@@ -46,3 +46,13 @@ debug_output.log
 # ===== 系统文件 =====
 Thumbs.db
 .DS_Store
+
+# ===== WorkBuddy 本地工作目录 =====
+
+# ===== WorkBuddy 本地工作目录 =====
+
+# ===== WorkBuddy 本地工作目录 =====
+.workbuddy/
+
+# ===== WorkBuddy 本地工作目录 =====
+.workbuddy/
