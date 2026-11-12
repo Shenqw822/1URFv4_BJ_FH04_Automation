@@ -1,0 +1,48 @@
+sysadmin(config)#show version
+product-8101
+mainboard   :
+board_cpld  : 
+software    : 
+kernel      : 
+slot 1      :
+board_cpld  : 
+fpga        : 
+hardware    :  
+slot 2      :
+board_cpld  : 
+fpga        : 
+hardware    :  
+slot 3      :
+board_cpld  : 
+fpga        : 
+hardware    :  
+slot 4      :
+board_cpld  : 
+fpga        : 
+hardware    :  
+slot 5      :
+board_cpld  : 
+sysadmin(config)#show version
+product-8101
+mainboard   :
+board_cpld  : 710e:01.00.00.04 build-2025/02/06 10:40
+software    : v1.0.49 build-2026/07/17 17:26:18
+kernel      : 4.14.0 build-2022.12.1 10:34:56
+slot 1      :
+board_cpld  : 710f:01.00.01.06 build-2026/06/05 14:36
+fpga        : c045:01.00.00.55 build-2026/06/01 21:00
+hardware    : bom_id:15 pcb_ver:0 board_type:s4e8b 
+slot 2      :
+board_cpld  : 710f:01.00.01.06 build-2026/06/05 14:36
+fpga        : c045:01.00.00.55 build-2026/06/01 21:00
+hardware    : bom_id:15 pcb_ver:0 board_type:s4e8b 
+slot 3      :
+board_cpld  : 710f:01.00.01.06 build-2026/06/05 14:36
+fpga        : c04a:01.00.00.14 build-2026/05/13 21:00
+hardware    : bom_id:15 pcb_ver:1 board_type:s4e8b 
+slot 4      :
+board_cpld  : 710f:01.00.01.06 build-2026/06/05 14:36
+fpga        : c044:01.00.01.01 build-2026/06/03 21:00
+hardware    : bom_id:15 pcb_ver:1 board_type:s4e8 
+slot 5      :
+board_cpld  : 710b:01.00.00.01 build-2022/11/16 17:59

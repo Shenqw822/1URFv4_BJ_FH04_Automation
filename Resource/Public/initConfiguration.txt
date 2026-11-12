@@ -1,0 +1,172 @@
+*** Settings ***
+Resource          ../Business/variable.txt
+Library           Telnet
+Library           String
+Library           Collections
+
+*** Keywords ***
+New Connection Custom
+    [Documentation]    Telnet 登录指定端口
+    Telnet.close all connections
+    ${status}=    run keyword and return status    Telnet.open connection    ${host_ip}    \    ${cli_login_port}    timeout=60
+    run keyword if    '${status}'=='False'    New Connection Custom
+    ${status1}=    run keyword and return status    Telnet.login    ${userName1}    ${userPw1}    login_prompt=user:    password_prompt=password:
+    run keyword if    '${status1}'=='False'    New Connection Custom
+    telnet.write    config
+    telnet.read until    ${userName1}(config)#
+    telnet.write    terminal length 0
+    telnet.read until    ${userName1}(config)#
+    [Teardown]
+
+setLgtypeAndportUp
+    New Connection Custom
+    comment    获取设备各槽位单板hwtype信息
+    telnet.write    show slot
+    ${tmp}=    telnet.read until    sysadmin(config)#
+    ${slot1_lgtype}    get regexp matches    ${tmp}    slot\\s+1\\{\\W+objidx\\s+:\\s+0x[0-9a-fA-F]+\\W+lgtype\\s+:\\s+\\S+\\D+hwtype\\s+:\\s+(\\S+)    1
+    ${slot2_lgtype}    get regexp matches    ${tmp}    slot\\s+2\\{\\W+objidx\\s+:\\s+0x[0-9a-fA-F]+\\W+lgtype\\s+:\\s+\\S+\\D+hwtype\\s+:\\s+(\\S+)    1
+    ${slot3_lgtype}    get regexp matches    ${tmp}    slot\\s+3\\{\\W+objidx\\s+:\\s+0x[0-9a-fA-F]+\\W+lgtype\\s+:\\s+\\S+\\D+hwtype\\s+:\\s+(\\S+)    1
+    ${slot4_lgtype}    get regexp matches    ${tmp}    slot\\s+4\\{\\W+objidx\\s+:\\s+0x[0-9a-fA-F]+\\W+lgtype\\s+:\\s+\\S+\\D+hwtype\\s+:\\s+(\\S+)    1
+    ${slot5_lgtype}    get regexp matches    ${tmp}    slot\\s+5\\{\\W+objidx\\s+:\\s+0x[0-9a-fA-F]+\\W+lgtype\\s+:\\s+\\S+\\D+hwtype\\s+:\\s+(\\S+)    1
+    ${slot6_lgtype}    get regexp matches    ${tmp}    slot\\s+6\\{\\W+objidx\\s+:\\s+0x[0-9a-fA-F]+\\W+lgtype\\s+:\\s+\\S+\\D+hwtype\\s+:\\s+(\\S+)    1
+    ${slot7_lgtype}    get regexp matches    ${tmp}    slot\\s+7\\{\\W+objidx\\s+:\\s+0x[0-9a-fA-F]+\\W+lgtype\\s+:\\s+\\S+\\D+hwtype\\s+:\\s+(\\S+)    1
+    ${slot1_lgtype}=    Set Variable    ${slot1_lgtype}[0]
+    ${slot2_lgtype}=    Set Variable    ${slot2_lgtype}[0]
+    ${slot3_lgtype}=    Set Variable    ${slot3_lgtype}[0]
+    ${slot4_lgtype}=    Set Variable    ${slot4_lgtype}[0]
+    ${slot5_lgtype}=    Set Variable    ${slot5_lgtype}[0]
+    ${slot6_lgtype}=    Set Variable    ${slot6_lgtype}[0]
+    ${slot7_lgtype}=    Set Variable    ${slot7_lgtype}[0]
+    ${slotId}    Set Variable    0
+    comment    配置逻辑板类型
+    FOR    ${lgtype}    IN    ${slot1_lgtype}    ${slot2_lgtype}    ${slot3_lgtype}    ${slot4_lgtype}    ${slot5_lgtype}    ${slot6_lgtype}    ${slot7_lgtype}
+        ${slotId}    Evaluate    ${slotId}+1
+        run keyword if    '${lgtype}'!='none'    telnet.write    slot ${slotId} lgtype ${lgtype}
+        ${info}=    run keyword if    '${lgtype}'!='none'    telnet.read until    ${userName1}(config)#
+        run keyword and continue on failure    run keyword if    '${lgtype}'!='none'    should not contain    ${info}    ERROR
+    END
+    comment    根据逻辑板配置所有端口up
+    FOR    ${i}    IN RANGE    1    8
+        run keyword if    '${slot${i}_lgtype}'=='hx100s-6e'    telnet.write    interface eth ${i}/0-11 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100-4e'    telnet.write    interface eth ${i}/0-7 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100s-10'    telnet.write    interface eth ${i}/0-19 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx25s-24'    telnet.write    interface eth ${i}/0-47 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hm100e-2'    telnet.write    interface eth ${i}/0-17 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100s-6'    telnet.write    interface eth ${i}/0-11 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100-10'    telnet.write    interface eth ${i}/0-19 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100s-1'    telnet.write    interface eth ${i}/0-4 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100-1'    telnet.write    interface eth ${i}/0-5 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100t-1'    telnet.write    interface eth ${i}/0-5 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hm100e'    telnet.write    interface eth ${i}/0-7 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx25s-14'    telnet.write    interface eth ${i}/0-27 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='hx100-2e'    telnet.write    interface eth ${i}/0-3 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='ht10s'    telnet.write    interface eth ${i}/0-19 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='s4e4'    telnet.write    interface eth ${i}/1-12 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='s4e8'    telnet.write    interface eth ${i}/1-12 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+        run keyword if    '${slot${i}_lgtype}'=='s4e8b'    telnet.write    interface eth ${i}/1-8 admin up fec fec-cl91
+        ${info}=    telnet.read
+        run keyword and continue on failure    should not contain    ${info}    ERROR
+    END
+
+addGroup
+    [Arguments]    ${flag}    ${group}    ${id}
+    New Connection Custom
+    ${len}=    get length    ${group}
+    FOR    ${i}    IN RANGE    ${len}
+        ${single}=    get from list    ${group}    ${i}
+        ${single}=    convert to string    ${single}
+        telnet.write    ${flag} ${id} add interface eth ${single}
+        telnet.read until    ${userName1}(config)#
+        telnet.write    show ${flag} ${id}
+        ${information}=    telnet.read until    ${userName1}(config)#
+    END
+
+Wait Device Reboot
+    [Documentation]  冷重启后轮询等待设备上线: 直接telnet登录→show version→校验板卡与版本
+    [Arguments]    ${max_wait}=660    ${interval}=60
+    ${max_wait}=    Convert To Integer    ${max_wait}
+    ${interval}=    Convert To Integer    ${interval}
+    Sleep    120s
+    ${elapsed}=    Evaluate    0
+    WHILE    $elapsed < $max_wait
+        TRY
+            Telnet.Close All Connections
+            Telnet.Open Connection    ${host_ip}    port=${cli_login_port}    timeout=10
+            Telnet.Login    ${userName1}    ${userPw1}    login_prompt=user:    password_prompt=password:    login_timeout=10
+            telnet.write    config
+            telnet.read until    ${userName1}(config)#
+            telnet.write    terminal length 0
+            telnet.read until    ${userName1}(config)#
+            telnet.write    show version
+            ${output}    Telnet.Read Until    ${userName1}(config)#
+            Log    ${output}
+            # 检查software行是否有版本号填充(未填充=设备未完全启动)
+            ${sw_line}=    Get Lines Matching Regexp    ${output}    software\\s+:\\s+\\S    partial_match=True
+            ${sw_len}=    Get Length    ${sw_line}
+            IF    ${sw_len} == 0
+                # 分支1: software字段为空, 设备未完全上线, 继续等待
+                Log    设备已可登录但show version版本信息为空(software字段未填充), 继续等待...
+            ELSE
+                # software字段有版本号: 设备已完全启动, 归一化换行符后比对
+                ${cr}=    Evaluate    chr(13)
+                ${lf}=    Evaluate    chr(10)
+                ${crlf}=    Catenate    ${cr}${lf}
+                ${output_norm}=    Replace String    ${output}    ${crlf}    ${lf}
+                ${ref_norm}=    Replace String    ${device_show_version_ref}    ${crlf}    ${lf}
+                ${ref_len}=    Get Length    ${ref_norm}
+                IF    ${ref_len} == 0
+                    Log    设备已完全上线(无初始化version基准可比对)
+                    RETURN
+                ELSE IF    $output_norm == $ref_norm
+                    # 分支2: output与初始化version一致, 设备完全上线
+                    Log    设备已完全上线, show version与初始化一致
+                    RETURN
+                ELSE
+                    # 分支3: output非空但与初始化version不一致, 上报异常但继续执行
+                    Log    设备已上线但show version与初始化不一致!
+                    Log    初始化version: ${device_show_version_ref}
+                    Log    当前version: ${output}
+                    RETURN
+                END
+            END
+        EXCEPT
+            Log    设备尚未就绪(Telnet连接或登录失败), 继续等待...
+        END
+        Telnet.Close All Connections
+        Sleep    ${interval}s
+        ${elapsed}    Evaluate    ${elapsed} + ${interval}
+        Log    等待设备上线... 已等待${elapsed}秒
+    END
+    Log    等待设备重启超时(${max_wait}秒)，设备未上线，继续执行后续步骤

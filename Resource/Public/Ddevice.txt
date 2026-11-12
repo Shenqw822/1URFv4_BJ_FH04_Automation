@@ -1,0 +1,370 @@
+*** Settings ***
+Resource          ../Business/variable.txt
+Library           ../Lib/support.py
+Resource          initConfiguration.txt
+Library           Dialogs
+Library           String
+Library           Telnet
+Library           Collections
+Resource          ../Business/variable.txt
+Library           ../../Resource/Lib/parseLib/DdevieParsePacket.py    # 解析报文函数
+Resource          TC500.txt
+
+*** Keywords ***
+getAclHitstatistics
+    [Arguments]    ${appIdListOrNot}    ${sleepTime}=10
+    [Documentation]    功能：返回根据appid返回show acl all中对应的规则的hit_num计数和show acl hit_statistics计数
+    ...    返回[hit_num, hit-counts]
+    ...
+    ...    优化记录：
+    ...    1. 为应对规则删除每次比对计数费时长--增加变量sleep_time ---0516_pwp
+    ...    2.兼容当appid为单独一个appid非列表支持--0527_pwp
+    sleep    ${sleepTime}
+    ${listOrNot}    Evaluate    isinstance(${appIdListOrNot},list)
+    ${appIdList}    Run Keyword If    ${listOrNot}    Set Variable    ${appIdListOrNot}
+    ...    ELSE    Create List    ${appIdListOrNot}
+    ${hitCount}    Set Variable    0
+    ${appIdListSet}    Evaluate    set(${appIdList})
+    New Connection Custom
+    FOR    ${id}    IN    @{appIdListSet}
+        telnet.write    show acl hit_statistics ${id}
+        ${information}=    Telnet.Read Until    ${userName1}(config)#
+        ${hitCountList}    get regexp matches    ${information}    ${id}\\s+(\\S+)    1
+        ${hitCountTmp}    Get From List    ${hitCountList}    0
+        ${hitCountSingal}    Replace String    ${hitCountTmp}    ,    ${EMPTY}
+        ${hitCount}    Set Variable    ${${hitCount}+${hitCountSingal}}
+    END
+    RETURN    ${hitCount}
+
+getPortStatistics
+    [Arguments]    ${port}
+    [Documentation]    获取端口计数
+    New Connection Custom
+    Telnet.Write    show statistics interface ${port}
+    ${information}=    Telnet.Read Until    ${userName1}(config)#
+    ${statis_lines}    Split To Lines    ${information}
+    ${statis_line}    Get Line    ${information}    2
+    ${statis_list}    Split String    ${statis_line}
+    ${port_statis}    Create Dictionary    rx-pkts=${statis_list}[2]    rx-bytes=${statis_list}[3]    jumbo=${statis_list}[4]    undersize=${statis_list}[5]    discard=${statis_list}[6]    fcsError=${statis_list}[7]    mtuExceeded=${statis_list}[8]    fragment=${statis_list}[9]    tx-pkts=${statis_list}[10]    tx-bytes=${statis_list}[11]
+    RETURN    ${port_statis}    # 字典形式返回对应的计数
+
+showSession
+    [Documentation]    返回current和remain对应的值
+    New Connection Custom
+    Telnet.Write    show flow_table | include flowtable
+    ${information}=    Telnet.Read Until    ${userName1}(config)#
+    ${statis_lines}    Split To Lines    ${information}
+    Remove From List    ${statis_lines}    -1
+    log    ${statis_lines}
+    ${statis_str}    Evaluate    ''.join(${statis_lines})
+    ${slot_id_list}    Split String    ${inportId}[0]    /
+    ${slot_id}    Get From List    ${slot_id_list}    0
+    ${statis_list_tmp}    get regexp matches    ${statis_str}    .*slot\\s+${slot_id}:\\s\\[current\\s+:(\\S+)\\].*remain\\s+:(\\S+)\\].*    1    2
+    ${statis_list}    Get From List    ${statis_list_tmp}    0
+    RETURN    ${statis_list}
+
+getPortInfo
+    [Arguments]    ${port}
+    [Documentation]    获取端口计数
+    ${port_info_dict}    Create Dictionary
+    ${prot_list}    Create List
+    New Connection Custom
+    Telnet.Write    show interface eth ${port}
+    ${information}=    Telnet.Read Until    ${userName1}(config)#
+    ${statis_lines}    Split To Lines    ${information}
+    ${line_count}    Get Length    ${statis_lines}
+    FOR    ${i}    IN RANGE    ${line_count}
+        ${port_info_lines}    Get Line    ${information}    ${i}
+        ${port_info_line}    Get Lines Containing String    ${port_info_lines}    :
+        Continue For Loop If    "${port_info_line}" == ""
+        ${dict_key_value}    get regexp matches    ${port_info_line}    \\t(\\S+)\\s+.*:\\s+(.*)    1    2
+        Set To Dictionary    ${port_info_dict}    ${dict_key_value}[0][0]    ${dict_key_value}[0][1]
+    END
+    RETURN    ${port_info_dict}    # 字典形式返回对应端口信息
+
+compareStastics
+    [Arguments]    ${inport}    ${outport}    ${expect_in_stastics}    ${expect_out_stastics}
+    [Documentation]    当预期为00代表不比较
+    ${in_statistics_pkts}    ${in_statistics_bytes}    ${in_all_pkt}    ${in_all_byte}    statistics    ${inport}    1
+    ${out_statistics_pkts}    ${out_statistics_bytes}    ${out_all_pkt}    ${out_all_byte}    statistics    ${outport}    9
+    ${in_statistics_pkts}    Convert To List    ${in_statistics_pkts}
+    ${in_statistics_bytes}    Convert To List    ${in_statistics_bytes}
+    ${out_statistics_pkts}    Convert To List    ${out_statistics_pkts}
+    ${out_statistics_bytes}    Convert To List    ${out_statistics_bytes}
+    ${all_statistics_pkts}    Create List
+    ${ingroup_member_num}    Get Length    ${in_statistics_pkts}
+    ${device_in}    Evaluate    ${in_statistics_pkts}[0]
+    ${device_out}    Evaluate    ${out_statistics_pkts}[-1]
+    ${all_statistics_pkts}    Run Keyword If    ${ingroup_member_num}!=${1}    combine lists    ${in_statistics_pkts}[1:]    ${out_statistics_pkts}[:-1]
+    ${all_statistics_bytes}    Run Keyword If    ${ingroup_member_num}!=${1}    combine lists    ${in_statistics_bytes}[1:]    ${out_statistics_bytes}[:-1]
+    ${pkts_count}    Run Keyword If    ${ingroup_member_num}!=${1}    Evaluate    len(set(${all_statistics_pkts}))
+    ${bytes_count}    Run Keyword If    ${ingroup_member_num}!=${1}    Evaluate    len(set(${all_statistics_bytes}))
+    Run Keyword And Continue On Failure    Run Keyword If    '${expect_in_stastics}'!='00'    Should Be Equal As Integers    ${device_in}    ${expect_in_stastics}    设备输入不等于仪表发送
+    Run Keyword And Continue On Failure    Run Keyword If    '${expect_out_stastics}'!='00'    Should Be Equal As Integers    ${device_out}    ${expect_out_stastics}    设备输出不等于仪表接收
+    #    Run Keyword And Continue On Failure    Run Keyword If    '${expect_out_stastics}'!='00'    Should Be Equal As Integers    ${device_in}    ${device_out}    设备输入不等于设备输出
+    Run Keyword If    ${ingroup_member_num}!=${1}    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${pkts_count}    ${1}    串接设备中间pkt计数不相等
+    Run Keyword If    ${ingroup_member_num}!=${1}    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${bytes_count}    ${1}    串接设备中间byte计数不相等
+    RETURN    ${in_all_pkt}    ${in_all_byte}    ${out_all_pkt}    ${out_all_byte}    # 返回rx_pkt,rx_byte,tx_pkt,tx_byte
+
+getCliTime
+    New Connection Custom
+    telnet.write    show systemtime
+    ${info}    Telnet.Read Until    ${userName1}(config)#
+    log    ${info}
+    @{lines}    Split To Lines    ${info}
+    RETURN    ${lines}[0]
+
+setSystemTime
+    [Arguments]    ${targetTime}
+    New Connection Custom
+    telnet.write    systemtime ${targetTime}
+    ${info}    Telnet.Read Until    ${userName1}(config)#
+    log    ${info}
+    ${currentTime}    getCliTime
+    log    系统时间已设置为: ${currentTime}
+    RETURN    ${currentTime}
+
+undoAclAll
+    New Connection Custom
+    telnet.write    undo acl all
+    ${info}    telnet.read until    ${userName1}(config)#
+    telnet.write    undo sni_limit
+    ${info}    telnet.read until    ${userName1}(config)#
+    sleep    5
+    SSHLibrary.Open Connection    ${host_ip}    timeout=120
+    SSHLibrary.login    root    fa
+    SSHLibrary.Write    pwd
+    sleep    1
+    SSHLibrary.Read
+    SSHLibrary.Write    cd /home/
+    sleep    1
+    SSHLibrary.Read
+    SSHLibrary.Write    cat luacmd_203f.txt |luacmd.lua
+    sleep    1
+    ${confdb}    SSHLibrary.Read Until    root@
+    log    ${confdb}
+    ${hello}    Get Regexp Matches    ${confdb}    :([0-9]{4,})H    1
+    log    ${hello}
+    ${times}    Get Count    ${hello}    0001    #8000为预期值
+    #    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${times}    1    清除老化未生效
+
+checkNumOrTimeResult
+    [Arguments]    ${pcapFile}    ${expectNum}    ${expectTime}    ${speed}    ${numOrTime}=1    ${wuCha}=3    # 仪表抓包文件|预期的流量大小|预期的时间大小|发包速率|校验num还是time(1=num,0=time)|允许的误差(单位s)
+    [Documentation]    \# 仪表抓包文件|预期的流量大小|预期的时间大小|发包速率|校验num还是time(1=num,0=time)|允许的误差(单位s)
+    comment    校验
+    ${exactTime}    ${exactNum}    ${firstPacketUnixTime}    bj_make    ${localRipePcapPath}${pcapFile}
+    ${numExactWucha}    Evaluate    abs((${exactNum}-${expectNum})*8/${speed})
+    ${numResult}    Evaluate    abs((${exactNum}-${expectNum})*8/${speed})<=${wuCha}
+    Run Keyword And Continue On Failure    Run Keyword If    ${numOrTime}==1    Should Be True    ${numResult}    预期输出:${expectNum}MB,实际输出:${exactNum}MB;误差超出速率${speed}Mbps时长${wuCha}s的流量
+    ${timeExactWucha}    Evaluate    abs(${exactTime}-${expectTime})
+    ${timeResult}    Evaluate    abs(${exactTime}-${expectTime})<=${wuCha}
+    Run Keyword And Continue On Failure    Run Keyword If    ${numOrTime}==0    Should Be True    ${timeResult}    预期放行时长:${expectTime}S,实际放行时长:${exactTime}s;误差超出${wuCha}s
+    RETURN    ${exactTime}    ${exactNum}    ${firstPacketUnixTime}
+
+netFlowCheck
+    [Arguments]    ${expectResult}    ${exactResult}    ${netFlowType}    ${pktIndex}    # 预期的netflow信息|实际转包解析出来的netflow信息|V4,V6
+    [Documentation]    \# 预期的netflow信息|实际转包解析出来的netflow信息|V4,V6
+    log    开始netFlow相关内容校验
+    ${singalValue}    Get From Dictionary    ${exactResult}    ${pktIndex}
+    log    ${singalValue}
+    netFlowCheckSingal    ${expectResult}    ${singalValue}    ${netFlowType}    ${pktIndex}
+
+netFlowCheckSingal_bak
+    [Arguments]    ${expectResultSingal}    ${exactSignalResult}    ${netFlowType}    ${pktIndex}
+    log    开始netFlow相关内容校验
+    ${valueListLen}    Get Length    ${exactSignalResult}
+    comment    设置公共预期值
+    ${netFlowPro}    Set Variable    UDP
+    ${netFlowVer}    Set Variable    V9
+    ${netFlowTypeUpper}    Convert To Upper Case    ${netFlowType}
+    ${netFlowLen}    Set Variable If    '${netFlowType}'=='V4'    34    58
+    ${comListIndex}    create list    ${4}    ${7}    ${8}    ${14}
+    ${comExpectValueDic}    Create Dictionary    ${comListIndex}[0]=${netFlowPro}    ${comListIndex}[1]=${netFlowVer}    ${comListIndex}[2]=${netFlowLen}    ${comListIndex}[3]=${netFlowTypeUpper}
+    ${comDictRela}    Create Dictionary    ${comListIndex}[0]="netFlow的协议"    ${comListIndex}[1]="netFlow的版本"    ${comListIndex}[2]="netFlow的长度"    ${comListIndex}[3]="netFlow统计类型(v4/v6)"
+    ${listRela}    Create List    smac    dmac    sip    dip    sport    dport    flow_srcip    flow_dstip    flow_sport    flow_dport    flow_protocol    flow_up_Byte    flow_up_packet    flow_down_Byte    flow_down_packet
+    ${exactExpectIndexCha}    Set Variable    0
+    FOR    ${Index}    IN RANGE    ${valueListLen}
+        ${exactExpectIndexCha}    Run Keyword If    ${Index} in ${comListIndex}    Set Variable    ${${exactExpectIndexCha}+1}
+        ...    ELSE    Set Variable    ${exactExpectIndexCha}
+        ${expectResultIndex}    Set Variable    ${${Index}-${exactExpectIndexCha}}
+        ${Value}    Get From List    ${exactSignalResult}    ${Index}
+        Run Keyword And Continue On Failure    Run Keyword If    ${Index} in ${comListIndex}    Should Be Equal As Strings    ${Value}    ${comExpectValueDic}[${Index}]    第${pktIndex}流统计包中${comDictRela}[${Index}]字段不符合预期
+        ...    ELSE    Should Be Equal As Strings    ${Value}    ${expectResultSingal}[${expectResultIndex}]    第${pktIndex}流统计包中${listRela}[${expectResultIndex}]字段不符合预期
+    END
+
+sendMultiCommand
+    [Arguments]    ${command}    ${resultFlag}=0
+    ${commandList}    Split String    ${command}    ,
+    New Connection Custom
+    FOR    ${com}    IN    @{commandList}
+        telnet.write    ${com}
+        ${info}    telnet.read until    ${userName1}(config)#
+        Run Keyword And Continue On Failure    Run Keyword If    ${resultFlag}==0    Should Not Contain    ${info}    ERROR    ${com}命令预期下发成功，实际却下发失败
+        ...    ELSE    Should Contain    ${info}    ERROR    ${com}命令预期下发失败，实际却下发成功
+    END
+
+netFlowCheckSingal
+    [Arguments]    ${expectResultSingal}    ${exactSignalResult}    ${netFlowType}    ${pktIndex}
+    log    开始netFlow相关内容校验
+    ${valueListLen}    Get Length    ${exactSignalResult}
+    comment    设置公共预期值
+    ${netFlowPro}    Set Variable    UDP    #4
+    ${netFlowVer}    Set Variable    V1    #7
+    ${upDownFlag}    Set Variable    0    #10
+    ${flowCount}    Set Variable    1    #8
+    ${res}    Set Variable    0    #12
+    ${netFlowTypeUpper}    Convert To Upper Case    ${netFlowType}    #11
+    ${comListIndex}    create list    ${4}    ${7}    ${8}    ${10}    ${11}    ${12}
+    ${comExpectValueDic}    Create Dictionary    ${comListIndex}[0]=${netFlowPro}    ${comListIndex}[1]=${netFlowVer}    ${comListIndex}[2]=${flowCount}    ${comListIndex}[3]=${upDownFlag}    ${comListIndex}[4]=${netFlowTypeUpper}    ${comListIndex}[5]=${res}
+    ${comDictRela}    Create Dictionary    ${comListIndex}[0]="netFlow的协议"    ${comListIndex}[1]="netFlow的版本"    ${comListIndex}[2]="netFlow的流统计"    ${comListIndex}[3]="netFlow的上下行流"    ${comListIndex}[4]="netFlow的统计类型(v4/v6)    ${comListIndex}[5]="netFlow的保留字段"
+    ${listRela}    Create List    smac    dmac    sip    dip    sport    dport    flowProtocol    flowSrcip    flowDstip    flowSport    flowDport    flowUpByte    flowUpPacket    flowDownByte    flowDownPacket
+    ${exactExpectIndexCha}    Set Variable    0
+    log    ${exactSignalResult}
+    FOR    ${Index}    IN RANGE    ${valueListLen}
+        ${exactExpectIndexCha}    Run Keyword If    ${Index} in ${comListIndex}    Set Variable    ${${exactExpectIndexCha}+1}
+        ...    ELSE    Set Variable    ${exactExpectIndexCha}
+        ${expectResultIndex}    Set Variable    ${${Index}-${exactExpectIndexCha}}
+        ${Value}    Get From List    ${exactSignalResult}    ${Index}
+        Run Keyword And Continue On Failure    Run Keyword If    ${Index} in ${comListIndex}    Should Be Equal As Strings    ${Value}    ${comExpectValueDic}[${Index}]    第${pktIndex}流统计包中${comDictRela}[${Index}]字段不符合预期
+        ...    ELSE    Should Be Equal As Strings    ${Value}    ${expectResultSingal}[${expectResultIndex}]    第${pktIndex}流统计包中${listRela}[${expectResultIndex}]字段不符合预期
+    END
+
+parserExcelToRcp
+    [Arguments]    ${cliAcl}
+    ${cliAclList}    Split String    ${cliAcl}    ;
+    Remove Values From List    ${cliAclList}    ${EMPTY}
+    ${sipG}    createlist
+    ${dipG}    createlist
+    ${emptyG}    create list    0/0    0    0    0    0
+    FOR    ${signalAcl}    IN    @{cliAclList}
+        ${fiveTuple}    Get Regexp Matches    ${signalAcl}    .*src_ip\\s+(\\S+)\\s+.*dst_ip\\s+(\\S+)\\s+.*sprotocol\\s+(\\S+)\\s+.*dprotocol\\s+(\\S+)\\s+.*sport\\s+(\\S+)\\s+.*dport\\s+(\\S+).*    1    2    3    4    5    6
+        ${dpro}    Split String    ${fiveTuple}[0][3]    /
+        ${spro}    Split String    ${fiveTuple}[0][2]    /
+        ${sportList}    Split String    ${fiveTuple}[0][4]    -
+        ${dportList}    Split String    ${fiveTuple}[0][5]    -
+        ${sipGSignal}    Create List    ${fiveTuple}[0][0]    @{sportList}    @{spro}
+        ${dipGSignal}    Create List    ${fiveTuple}[0][1]    @{dportList}    @{dpro}
+        Append To List    ${sipG}    ${sipGSignal}
+        Append To List    ${dipG}    ${dipGSignal}
+    END
+    ${sipGlen}    Get Length    ${sipG}
+    ${dipGlen}    Get Length    ${dipG}
+    Run Keyword If    ${sipGlen}!=1    Remove Values From List    ${sipG}    ${emptyG}
+    Run Keyword If    ${dipGlen}!=1    Remove Values From List    ${dipG}    ${emptyG}
+    RETURN    ${sipG}    ${dipG}
+
+get_zxflow_pkts_bytes
+    [Arguments]    ${pcaptitle}    ${tx}
+    ${PcapTitle_list}    Split String    ${pcaptitle}    ,
+    ${zxflow_pos_bytes_list}    Create List
+    ${zxflow_rev_bytes_list}    Create List
+    ${zxflow_pos_pkts_list}    Create List
+    ${zxflow_rev_pkts_list}    Create List
+    ${tx_bytes_index}    Create List    ${1}    ${3}    ${5}    ${7}
+    ${len}    Get Length    ${PcapTitle_list}
+    FOR    ${index}    IN RANGE    ${len}
+        ${tx_pkts}    Set Variable    ${${tx}[${${tx_bytes_index}[${index}]-1}]}
+        ${tx_bytes}    Set Variable    ${${tx}[${tx_bytes_index}[${index}]]+${tx}[${${tx_bytes_index}[${index}]-1}]*4}
+        Run Keyword If    ${len} == 1    Append To List    ${zxflow_pos_bytes_list}    ${tx_bytes}
+        Run Keyword If    ${len} == 1    Append To List    ${zxflow_pos_pkts_list}    ${tx_pkts}
+        Continue For Loop If    ${len} == 1
+        Run Keyword If    "postive" in "${PcapTitle_list}[${index}]"    Append To List    ${zxflow_pos_bytes_list}    ${tx_bytes}
+        ...    ELSE    Append To List    ${zxflow_rev_bytes_list}    ${tx_bytes}
+        Run Keyword If    "postive" in "${PcapTitle_list}[${index}]"    Append To List    ${zxflow_pos_pkts_list}    ${tx_pkts}
+        ...    ELSE    Append To List    ${zxflow_rev_pkts_list}    ${tx_pkts}
+    END
+    ${zxflow_pos_bytes}    Evaluate    sum(${zxflow_pos_bytes_list})
+    ${zxflow_rev_bytes}    Evaluate    sum(${zxflow_rev_bytes_list})
+    ${zxflow_pos_pkts}    Evaluate    sum(${zxflow_pos_pkts_list})
+    ${zxflow_rev_pkts}    Evaluate    sum(${zxflow_rev_pkts_list})
+    RETURN    ${zxflow_pos_bytes}    ${zxflow_pos_pkts}    ${zxflow_rev_bytes}    ${zxflow_rev_pkts}
+
+check_history_alarm_time
+    [Arguments]    ${command}
+    [Documentation]    MR 8789
+    New Connection Custom
+    #    telnet.write    show alarm history | include "Los"
+    telnet.write    ${command}
+    ${info}    telnet.read until    ${userName1}(config)#
+    ${los_lines}    Split To Lines    ${info}
+    Remove From List    ${los_lines}    -1
+    log    ${los_lines}
+    FOR    ${i}    IN    @{los_lines}
+        ${times}    Get Regexp Matches    ${i}    .*(2024/[0-9][0-9]/[0-9][0-9]\\s+[0-9][0-9]:[0-9][0-9]:[0-9][0-9])\\s+(2024/[0-9][0-9]/[0-9][0-9]\\s+[0-9][0-9]:[0-9][0-9]:[0-9][0-9]).*    1    2
+        log    ${times}[0]
+        ${a}    Evaluate    [i.replace("/",".") for i in ${times}[0]]
+        ${b}    Evaluate    [i.replace(" ","-") for i in ${a}]
+        ${starttime}    cli_time_epoc_switchRcp    ${b}[0]    1    0
+        ${endtime}    cli_time_epoc_switchRcp    ${b}[1]    1    0
+        Should Be True    ${starttime}<=${endtime}
+    END
+
+undoFiveTupleByRCP
+    [Arguments]    ${ruleid_all}
+    comment    通过rcp指定ruid删除五元组规则
+    ${expectRespondCode}    Set Variable    01
+    FOR    ${rule_id}    IN    @{ruleid_all}
+        #    Run Keyword And Ignore Error    delete_fivetuple    ${ruleId}    ${expectRespondCode}
+        ${requestBody}    ${expectResponse}    ${actualResponse}    ${ruleId}    delete_fivetuple    ${ruleId}    ${expectRespondCode}
+        Run Keyword And Continue On Failure    Should Be Equal As Strings    ${expectResponse}    ${actualResponse}
+    END
+
+compareStastics_mtu
+    [Arguments]    ${inport}    ${outport}    ${expect_in_stastics}    ${expect_out_stastics}
+    ${in_statistics_pkts}    ${in_statistics_bytes}    ${in_all_pkt}    ${in_all_byte}    statistics_mtu    ${inport}    1
+    ${out_statistics_pkts}    ${out_statistics_bytes}    ${out_all_pkt}    ${out_all_byte}    statistics    ${outport}    9
+    ${in_statistics_pkts}    Convert To List    ${in_statistics_pkts}
+    ${in_statistics_bytes}    Convert To List    ${in_statistics_bytes}
+    ${out_statistics_pkts}    Convert To List    ${out_statistics_pkts}
+    ${out_statistics_bytes}    Convert To List    ${out_statistics_bytes}
+    ${all_statistics_pkts}    Create List
+    ${ingroup_member_num}    Get Length    ${in_statistics_pkts}
+    ${device_in}    Set Variable    ${in_statistics_pkts}[0]
+    ${device_out}    Set Variable    ${out_statistics_pkts}[-1]
+    ${all_statistics_pkts}    Run Keyword If    ${ingroup_member_num}!=${1}    combine lists    ${in_statistics_pkts}[1:]    ${out_statistics_pkts}[:-1]
+    ${all_statistics_bytes}    Run Keyword If    ${ingroup_member_num}!=${1}    combine lists    ${in_statistics_bytes}[1:]    ${out_statistics_bytes}[:-1]
+    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${device_in}    ${expect_in_stastics}    设备输入不等于仪表发送
+    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${device_out}    ${expect_out_stastics}    设备输出不等于仪表接收
+    Run Keyword If    ${ingroup_member_num}!=${1}    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${pkts_count}    ${1}    串接设备中间pkt计数不相等
+    Run Keyword If    ${ingroup_member_num}!=${1}    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${bytes_count}    ${1}    串接设备中间byte计数不相等
+    RETURN    ${in_all_pkt}    ${in_all_byte}    ${out_all_pkt}    ${out_all_byte}    # 返回端口组内所有累计的rx_pkt,rx_byte,tx_pkt,tx_byte
+
+compareStastics_old
+    [Arguments]    ${inport}    ${outport}    ${expect_in_stastics}    ${expect_out_stastics}
+    [Documentation]    当预期为00代表不比较
+    ${in}=    statistics    ${inport}    1
+    ${outgroupf_statistics}=    statistics    ${outport}    9
+    Run Keyword And Continue On Failure    Run Keyword If    '${expect_in_stastics}'!='00'    Should Be Equal As Integers    ${in}[0]    ${expect_in_stastics}    设备rx端口的rxpkt计数不对
+    Run Keyword And Continue On Failure    Run Keyword If    '${expect_out_stastics}'!='00'    Should Be Equal As Integers    ${outgroupf_statistics}[0]    ${expect_out_stastics}    设备tx端口的txxpkt计数不对
+    #    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${in}[0]    ${expect_in_stastics}    设备rx端口的rxpkt计数不对
+    #    Run Keyword And Continue On Failure    Should Be Equal As Integers    ${outgroupf_statistics}[0]    ${expect_out_stastics}    设备tx端口的txxpkt计数不对
+    RETURN    ${in}[0]    ${in}[1]    ${outgroupf_statistics}[0]    ${outgroupf_statistics}[1]    # 返回rx_pkt,rx_byte,tx_pkt,tx_byte
+
+queryRcpLimit
+    [Arguments]    ${ruleId}    ${testTitle}    ${cliType}
+    [Documentation]    根据规则类型选择查询关键字，执行RCP查询并校验响应，
+    ...    返回放行总量(${totalPass})和周期放行量(${periodPass})
+    ${queryKw}    Set Variable If    '${cliType}'=='stage3_f'    queryRuleNew_fivetuple
+    ${queryKw}    Set Variable If    '${cliType}'=='l2'    queryRulenew_L2    ${queryKw}
+    ${queryKw}    Set Variable If    '${cliType}'=='grouped_rule'    queryRuleNew    ${queryKw}
+    ${request}    ${expect_respond}    ${exactRespond}    ${ruleid}    Run Keyword    ${queryKw}    ${ruleId}    rcpClearLimit    ${testTitle}
+    Should Be Equal As Strings    ${expect_respond}[:-96]    ${exactRespond}[:-96]    RCP查询规则${testTitle}异常
+    ${totalPass}    Hex To Int    ${exactRespond}[-96:-80]
+    ${periodPass}    Hex To Int    ${exactRespond}[-80:-64]
+    RETURN    ${totalPass}    ${periodPass}
+
+deleteRcpRule
+    [Arguments]    ${ruleId}    ${cliType}
+    [Documentation]    根据规则类型选择删除关键字，执行RCP删除并校验响应
+    ${deleteKw}    Set Variable If    '${cliType}'=='stage3_f'    delete_fivetuple
+    ${deleteKw}    Set Variable If    '${cliType}'=='l2'    delete_L2    ${deleteKw}
+    ${deleteKw}    Set Variable If    '${cliType}'=='grouped_rule'    delete    ${deleteKw}
+    ${requestBody}    ${expectResponse}    ${actualResponse}    ${ruleIdDel}    Run Keyword    ${deleteKw}    ${ruleId}    01
+    Should Be Equal As Strings    ${expectResponse}    ${actualResponse}    rcp删除规则${ruleId}失败
+
+send_cli_command
+    [Arguments]    ${command}
+    New Connection Custom
+    Telnet.Write    ${command}
+    ${info}=    Telnet.Read Until    ${userName1}(config)#
+    should not contain    ${info}    ERROR:

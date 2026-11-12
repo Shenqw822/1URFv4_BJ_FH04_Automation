@@ -1,0 +1,5 @@
+*** Settings ***
+Library           Dialogs
+Library           String
+Library           Telnet
+Library           SSHLibrary

@@ -1,0 +1,26 @@
+================================================================
+问题：RIDE 打开 1URFv4_BJ_NEW 目录报错 "invalid data file"
+================================================================
+
+【现象】
+在 RIDE 2.1.4.1 中打开 F:\cc-test\1URFv4_BJ_NEW 套件目录时报错：
+    invalid data file 'F:\cc-test\1URFv4_BJ_NEW'
+
+【根因】
+Resource/Lib/rcpLib/run_log.txt 是 GBK 编码的调试日志文件（内容为 RcpApi
+打印的调试信息，含中文）。RIDE 打开目录时会用自带的 RF 解析器（3.1.2）
+递归扫描目录中的 .txt 文件，解析前先用 UTF-8 读取文件内容做语言检测，
+读到 GBK 编码的中文字节时抛出 UnicodeDecodeError（非 RF 的 DataError 异常），
+该异常未被任何 except 捕获，一路传播导致整个目录加载失败，最终弹
+"Invalid data file"。
+
+【解决】
+删除 Resource/Lib/rcpLib/run_log.txt（该文件无任何代码引用，是孤立的调试
+日志）。已删除。
+
+【备注】
+- RIDE 的 RF 解析器会尝试解析 .txt/.robot/.tsv/.rst 扩展名文件，其中
+  .txt 若为 GBK 编码且含中文会触发此问题。今后避免在套件目录下残留 GBK
+  编码的 .txt 调试日志。
+- 目录下的 debug_output.log（108MB）为 .log 扩展名，RIDE 会忽略，不是
+  本次报错原因，但可顺手清理。

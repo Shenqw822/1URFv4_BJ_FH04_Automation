@@ -1,0 +1,48 @@
+# ===== 大体积流量数据（不入库，走本地/服务器存放） =====
+Resource/Business/ripe_packets/
+Resource/Lib/parseLib/hhh.txt
+Resource/Lib/parseLib/hhh_192.txt
+Resource/Lib/parseLib/IPFIX_200w.pcap
+
+# ===== pcap 一律不入库（与 1URFv4_new 仓库约定一致） =====
+*.pcap
+*.pcapng
+*.pcap*
+
+# ===== 版本报告 / 大型 HTML 产物 =====
+v1.0.52.html
+v1.0.53.html
+v1.0.53-A.html
+hash.html
+*.html.report
+
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# ===== IDE =====
+.idea/
+.vscode/
+*.iml
+
+# ===== 日志 / 临时文件 =====
+*.log
+run_log.txt
+debug_output.log
+*.bak
+*.bak_0xffff
+*.bak20240703
+*.tmp
+
+# ===== 打包产物 =====
+*.rar
+*.zip
+*.dist-info/
+
+# ===== 系统文件 =====
+Thumbs.db
+.DS_Store

@@ -1,0 +1,1281 @@
+#!/bin/bash/env python
+# -*- coding:utf-8 -*-
+# Author PeiWenPing
+# time:2022/2/25:11:17
+# email:peiwenping@finslink.com
+
+
+#from trex_stl_lib.api import *
+from scapy.all import *
+import scapy
+import binascii
+import re
+import confignetflow
+import os
+#import dpkt
+import time
+import datetime
+import struct
+import uuid
+base = [str(x) for x in range(10)] + [chr(x)
+                                      for x in range(ord('A'), ord('A') + 6)]
+
+ID_TO_PRO = {
+    132:"SCTP",
+    1:"ICMP",
+    2:"IGMP",
+    6:"TCP",
+    8:"EGP",
+    9:"IGP",
+    17:"UDP",
+    42:"IPV6",
+    47:"GRE",
+    50:"ESP",
+    51:"AH",
+    58:"ICMPV6",
+    89:"OSPF",
+   112:"VRRP",
+    115:"L2TP",
+    253:'UNKNOW',
+    0:"NO"
+    }
+
+class DdevieParsePacket:
+    """通过 scapy包提供解析报文功能"""
+
+    def __init__(self):
+        self.pkts = ''
+        self.dst_mac = self._mac("dst")
+        self.src_mac = self._mac("src")
+        self.vlan_in_vlan = self.__vlan_in_vlan()
+
+    def parser_pcapfile(self, pcapfile):
+        """
+        解析pcap文件转为对应的pkts
+        :return: pkts
+        """
+        self.pkts = rdpcap(pcapfile)
+        # self.pkts = PcapReader(pcapfile)
+        # self.pkts =  RawPcapReader(pcapfile)
+        self.dst_mac = self._mac("dst")
+        self.src_mac = self._mac("src")
+        self.vlan_in_vlan = self.__vlan_in_vlan()
+        return len(self.pkts)
+
+    def __change_mac_hex_to_bin(self, hex_data):
+        """
+        把对应的16进制转为2进制，且进行0补全
+        :param hex_data 需要转化的16进制
+        :return: bit_data
+        """
+        data_bit_tmp = int(str(hex_data).replace(':', ''), 16)
+        data_bit_48 = '{:048b}'.format(data_bit_tmp)
+        return data_bit_48
+
+    def __change_dec_to_bin(self, dec_data, bit_len):
+        """
+        把对应的10进制转为2进制，位数不够进行0填充
+        :param dec_data 10进制数据
+        :param bit_len: 位数
+        :return:
+        """
+        data_bit_tmp = int(str(dec_data).replace(',', ''), 10)
+        c = '{:0%sb}' % bit_len
+        data_bit = c.format(data_bit_tmp)
+        return data_bit
+
+    def _mac(self, mac_type):
+        """
+        按照要求提取对应的MACI地址信息
+        :param mac_type src,dst
+        :return:{pkindex,dst}
+        """
+        mac_dict = {}
+        pkt_index = 0
+        for i in self.pkts:
+            pkt_index += 1
+            if not i.haslayer(Ether):
+                mac_dict[pkt_index] = '0' * 48
+            else:
+                mac = i['Ether'].dst if str(
+                    mac_type).lower() == 'dst' else i['Ether'].src
+                mac_dict[pkt_index] = self.__change_mac_hex_to_bin(mac)
+        return mac_dict
+
+    def __vlan_in_vlan(self):
+        """
+        按要求提取二层vlan信息
+        cfi对那个scapy解析后的id,vid对应vlan,type对应type,pri对应prio
+        :return:
+        """
+        try:
+            pkt_index = 0
+            vlan_dict = {}
+            for pkt in self.pkts:
+                pkt_index += 1
+                if not pkt.haslayer(Dot1Q):
+                    vlan_dict[pkt_index] = '0' * 64
+                else:
+                    vlan_0_type = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][0].type, 16)
+                    vlan_0_prio = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][0].prio, 3)
+                    vlan_0_cfi = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][0].id, 1)
+                    vlan_0_vid = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][0].vlan, 12)
+                    vlan_1_type = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][1].type, 16)
+                    vlan_1_prio = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][1].prio, 3)
+                    vlan_1_cfi = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][1].id, 1)
+                    vlan_1_vid = self.__change_dec_to_bin(
+                        pkt['Dot1Q'][1].vlan, 12)
+                    vlan_dict[str(pkt_index)] = vlan_0_type + vlan_0_prio + vlan_0_cfi + \
+                        vlan_0_vid + vlan_1_type + vlan_1_prio + vlan_1_cfi + vlan_1_vid
+
+            return vlan_dict
+        except BaseException:
+            pass
+
+    def fh8108(self):
+        """
+        提取需要验证的appid和入端口，且组合成appid和interface输出
+        :return {pkindex1:[appid,interface],pkindex2:[appid,interface]...]
+        """
+        src_dict = {}
+        for i in self.src_mac:
+            # appid_bin = self.src_mac[i][0:7] + self.src_mac[i][8:24]
+            # appid_dec = str(int(appid_bin, 2))
+            slot_id_tmp = self.src_mac[i][24:32]
+            slot_id = str(int(slot_id_tmp, 2))
+
+            zika_id_tmp = self.src_mac[i][24:32]
+            zika_id = str(int(zika_id_tmp, 2))
+            device_id_tmp = self.src_mac[i][32:40]
+            device_id = str(int(device_id_tmp, 2))
+            # interface = str(int(self.src_mac[i][24:32], 2)) + "/" + str(int(self.src_mac[i][32:40], 2))
+            interface = str(
+                int(self.src_mac[i][8:12], 2)) + "/" + str(int(self.src_mac[i][12:20], 2))
+            src_dict[str(i)] = [slot_id, interface, device_id, zika_id]
+        return src_dict
+
+    def direct_copy(self, d_g='d'):
+        """
+        直接复制输出的信息：目的mac、源mac
+        目的MAC格式：
+        47~41 | 40 | 39~24 |  23~16  | 15~13 |   12        |      11~0      |
+        机器号| 0 |   0   | 输出组ID|   0   |D输入端口方向| D设备输入端口号|
+
+        源MAC格式
+        47~32 |    31~0       |
+         0   | 复制流量ruleid |
+         :param d_g d:D携带信息 g:携带信息 默认d
+        :return:{pktindex:[src[0~48],dst[0~48]]
+        """
+        src_dict = {}
+        if str(d_g).lower() == 'd':
+            for i in self.src_mac:
+
+                src_dict[str(i)] = [self.src_mac[i][0:16], self.src_mac[i][16:48]], [self.dst_mac[i][0:7], self.dst_mac[i][7],
+                                                                                     self.dst_mac[i][8:24], self.dst_mac[i][24:32],
+                                                                                     self.dst_mac[i][32:35], self.dst_mac[i][35],
+                                                                                     self.dst_mac[i][36:48]]
+        else:
+            for i in self.src_mac:
+                src_dict[str(i)] = [self.src_mac[i][0:16], self.src_mac[i][16:48]], [self.dst_mac[i][0:7],
+                                                                                     self.dst_mac[i][7],
+                                                                                     self.dst_mac[i][8:24],
+                                                                                     self.dst_mac[i][24:32],
+                                                                                     self.dst_mac[i][32:35],
+                                                                                     self.dst_mac[i][35],
+                                                                                     self.dst_mac[i][36:40],
+                                                                                     self.dst_mac[i][40:48]]
+        return src_dict
+
+    def indirect_copy_not_specified(self, d_g='d'):
+        """
+        间接复制-非指定计算单元输出的信息：目的mac、源mac
+        目的MAC格式：
+        47~41 | 40 |        39~32     |      31~24   |      23~16    | 15~13 |      12      |      11~0      |
+        机器号| 0 |  业务7~0输出标记 | 业务7 ACL组号|  业务6 ACL组号|   0   | D输入端口方向| D设备输入端口号|
+
+        源MAC格式
+        |      47~40    |      39~32     |       31~24     |       23~16     |        15~8      |       7~0      |
+        | 业务5 ACL组号 |  业务4 ACL组号 |  业务3 ACL组号  |  业务2 ACL组号  |  业务1 ACL组号  |  业务0 ACL组号  |
+         :param d_g d:D携带信息 g:携带信息 默认d
+        :return: pktindex:[src[0~48],dst[0~48]]
+        """
+        src_dict = {}
+        if str(d_g).lower() == 'd':
+            for i in self.src_mac:
+                src_dict[str(i)] = [self.src_mac[i][0:8], self.src_mac[i][8:16], self.src_mac[i][16:24], self.src_mac[i][24:32],
+                                    self.src_mac[i][32:40], self.src_mac[i][40:48]], [self.dst_mac[i][0:7], self.dst_mac[i][7],
+                                                                                      self.dst_mac[i][8:16],
+                                                                                      self.dst_mac[i][16:24],
+                                                                                      self.dst_mac[i][24:32],
+                                                                                      self.dst_mac[i][32:35],
+                                                                                      self.dst_mac[i][35],
+                                                                                      self.dst_mac[i][36:48]]
+        else:
+            for i in self.src_mac:
+                src_dict[str(i)] = [self.src_mac[i][0:8], self.src_mac[i][8:16], self.src_mac[i][16:24], self.src_mac[i][24:32],
+                                    self.src_mac[i][32:40], self.src_mac[i][40:48]], [self.dst_mac[i][0:7], self.dst_mac[i][7],
+                                                                                      self.dst_mac[i][8:16],
+                                                                                      self.dst_mac[i][16:24],
+                                                                                      self.dst_mac[i][24:32],
+                                                                                      self.dst_mac[i][32:35],
+                                                                                      self.dst_mac[i][35],
+                                                                                      self.dst_mac[i][36:40],
+                                                                                      self.dst_mac[i][40:48]]
+
+        return src_dict
+
+    def indirect_copy_specified(self, d_g='d'):
+        """
+        间接复制-指定计算单元输出的信息：vlan_in_vlan、目的mac、源mac
+        目的MAC格式：
+        |                   47~0           |
+        |          业务7~4的计算单元       |
+
+        源MAC格式
+        |                   47~0           |
+        |          业务3~0的计算单元       |
+
+        802.1Q vlan
+
+         type  |             PRI          |   CFI |       VID        |    TYPE  |       PRI      |  CFI  |             VID                |
+        16 bit |            3 bit         | 1 bit |      12 bit      |   16bit  |      3bit     |  1 bit |            12 bit              |
+        15~0   |  2~1 |        0          |   0   |      11~0        |   15~0   |      2~0     |    0    |      11~8    |      7~0        |
+        0x8100|   0   | D设备输入端口方向 |   0   |  D设备输入端口号 |  0x8100  |  机器号6~4/7 |    0    |  机器号3~0/7 | 某业务的ACL组号 |
+         :param d_g d:D携带信息 g:携带信息 默认d
+        :return::{pktindex:[src[0~48],dst[0~48],vlan[]
+        """
+        src_dict = {}
+        if str(d_g).lower() == 'd':
+            for i in self.src_mac:
+                src_dict[str(i)] = [self.src_mac[i][0:48], [self.dst_mac[i][0:48]], [self.vlan_in_vlan[i][0:16],
+                                                                                     self.vlan_in_vlan[i][16:18],
+                                                                                     self.vlan_in_vlan[i][18],
+                                                                                     self.vlan_in_vlan[i][19],
+                                                                                     self.vlan_in_vlan[i][20:32],
+                                                                                     self.vlan_in_vlan[i][32:48],
+                                                                                     self.vlan_in_vlan[i][48:51],
+                                                                                     self.vlan_in_vlan[i][51],
+                                                                                     self.vlan_in_vlan[i][52:56],
+                                                                                     self.vlan_in_vlan[i][56:64]]]
+        else:
+            for i in self.src_mac:
+                src_dict[str(i)] = [self.src_mac[i][0:48], [self.dst_mac[i][0:48]], [self.vlan_in_vlan[i][0:16],
+                                                                                     self.vlan_in_vlan[i][16:18],
+                                                                                     self.vlan_in_vlan[i][18],
+                                                                                     self.vlan_in_vlan[i][19],
+                                                                                     self.vlan_in_vlan[i][20:24],
+                                                                                     self.vlan_in_vlan[i][24:32],
+                                                                                     self.vlan_in_vlan[i][32:48],
+                                                                                     self.vlan_in_vlan[i][48:51],
+                                                                                     self.vlan_in_vlan[i][51],
+                                                                                     self.vlan_in_vlan[i][52:56],
+                                                                                     self.vlan_in_vlan[i][56:64]]]
+
+        return src_dict
+
+    def copy_mode_return_info(self, copy_mode, d_g='d', *args):
+        """
+        根据复制模式不一样返回对应的信息
+        :param copy_mode: direction:直接复制模式,indirection_assigned:间接指定模式  indirection_unassigned:间接非指定模式
+         :param d_g d:D携带信息 g:携带信息 默认d
+        :param args: 可变长
+        :return: pktindex:[src[0~48],dst[0~48]] or pktindex:[src[0~48],dst[0~48],vlan[]
+        """
+        if str(copy_mode).lower() == 'direction':
+            return self.direct_copy(d_g)
+        elif str(copy_mode).lower() == 'indirection_assigned':
+            return self.indirect_copy_specified(d_g)
+        else:
+            return self.indirect_copy_not_specified(d_g)
+
+    def make_compare_packet_info(
+            self, org_pcapfile, d_out_pcapfile, hit_pktindex=0):
+        """
+        1.把d_out_pcapfile中每个包的smac和dmac换成org_pcapfile中的每个包的smac和dmac
+        :param org_pcapfile:
+        :param d_out_pcapfile:
+        :return:[发送的pkts,修改后pkts]
+        """
+        change_pkt = []
+        self.parser_pcapfile(org_pcapfile)
+        org_pkts = self.pkts
+        org_pkts_new = []
+        self.parser_pcapfile(d_out_pcapfile)
+        d_out_pkts = self.pkts
+        # print(org_pkts[0].show())
+        d_out_pkts_len = len(d_out_pkts)
+        if not hit_pktindex:
+            for pktindex in range(d_out_pkts_len):
+                d_out_pkts[pktindex][Ether].src = org_pkts[pktindex][Ether].src
+                d_out_pkts[pktindex][Ether].dst = org_pkts[pktindex][Ether].dst
+                try:
+                    d_out_pkts[pktindex][Padding] = org_pkts[pktindex][Padding]
+                    d_out_pkts[pktindex][TCP].chksum = org_pkts[pktindex][TCP].chksum
+                    d_out_pkts[pktindex][UDP].chksum = org_pkts[pktindex][UDP].chksum
+                except BaseException:
+                    pass
+                change_pkt.append(d_out_pkts[pktindex][1:])
+                org_pkts_new.append(org_pkts[pktindex][1:])
+        else:
+            pass
+        return org_pkts_new, change_pkt
+
+    def get_vlan_info(self, pcapfile):
+        """
+        获取pcapfile中包的vlan信息
+        :param pcapfile: pcapfile文件
+        :return: {pktindex:[vlan_layers,[vid1,vid2,...]]}
+        """
+        # 解析pcapfile
+        self.parser_pcapfile(pcapfile)
+        pkts = self.pkts
+        return_info = {}
+        pkts_len = len(pkts)
+        # 以包序列号进行循环
+        for pktindex in range(pkts_len):
+            ad_count = 0
+            q_count = 0
+            vlan_id = []
+            # 以每个包的layer进行判断是否含有vlan层
+            for layer in pkts[pktindex].layers():
+                if layer is scapy.layers.l2.Dot1AD:
+                    vid = pkts[pktindex]['Dot1AD'][ad_count].vlan
+                    vlan_id.append(vid)
+                    ad_count += 1
+                elif layer is scapy.layers.l2.Dot1Q:
+                    vid = pkts[pktindex]['Dot1Q'][q_count].vlan
+                    vlan_id.append(vid)
+                    q_count += 1
+            vlan_layer_count = ad_count + q_count
+            if not vlan_id:
+                vlan_id = 0
+            return_info[pktindex] = [vlan_layer_count, vlan_id]
+        return return_info
+
+    def delete_first_vlan(self, pcapfile):
+        """删除某一层vlan"""
+        self.parser_pcapfile(pcapfile)
+        pkts = self.pkts
+        new_pkts = []
+        for pkt in pkts:
+            try:
+                pkt.remove_underlayer(Dot1Q)
+                print(pkt.show())
+                time.sleep(1000)
+            except BaseException:
+                pass
+
+    def extract_five_tuple_from_pcap(self, pcap_file, list_dict=1,have_mac=0):
+        """
+
+        :param pcap_file: 解析的pcapfile
+        :param list_dict: 1：返回list，0：返回dict
+        :param have_mac :0不包含mac信息;1包含mac信息；默认不包含
+        :return:
+        """
+        # 读取pcap文件
+        pktindex = 0
+        packets = rdpcap(pcap_file)
+        # 存储提取的五元组的列表
+        five_tuple_all = [] if list_dict else {}
+
+        # 遍历每个数据包
+        for packet in packets:
+            pktindex += 1
+            # 检查是否有IP层
+            if IP in packet or IPv6 in packet:
+                ip_layer = packet[IP] if IP in packet else packet[IPv6]
+
+                # 获取五元组信息
+                src_ip = ip_layer.src if IP in packet else self.v6JianToQuan(ip_layer.src)
+                dst_ip = ip_layer.dst if IP in packet else self.v6JianToQuan(ip_layer.dst)
+
+                # 根据协议类型提取端口信息
+                if TCP in ip_layer:
+                    protocol = 'TCP'
+                    src_port = ip_layer[TCP].sport
+                    dst_port = ip_layer[TCP].dport
+                elif UDP in ip_layer:
+                    protocol = 'UDP'
+                    src_port = ip_layer[UDP].sport
+                    dst_port = ip_layer[UDP].dport
+                elif SCTP in ip_layer:
+                    protocol = 'SCTP'
+                    src_port = ip_layer[SCTP].sport
+                    dst_port = ip_layer[SCTP].dport
+                else:
+                    # 如果是其他协议，可以根据实际情况进行处理
+                    protocol = 'Other'
+                    src_port = 0
+                    dst_port = 0
+                if not packet.haslayer(Ether):
+                    dst_mac = '-'.join(['00' for _ in range(6)])
+                    src_mac = '-'.join(['00' for _ in range(6)])
+                else:
+                    dst_mac = packet['Ether'].dst
+                    src_mac = packet['Ether'].src
+                # 将五元组信息添加到列表中
+                if have_mac:
+                    five_tuple = [src_mac.replace(':',"-"),dst_mac.replace(':',"-"),src_ip, src_port, dst_ip, dst_port, protocol]
+                else:
+                    five_tuple = [src_ip, src_port, dst_ip, dst_port, protocol]
+                # print(five_tuple)
+                if list_dict:
+                    five_tuple_all.append(five_tuple)
+                else:
+                    five_tuple_all[pktindex] = five_tuple
+
+        return five_tuple_all
+
+    def extract_smac_from_pcap(self, pcap_file):
+
+        packets = rdpcap(pcap_file)
+
+        smac_list = []
+
+        for packet in packets:
+            if Ether in packet and IP in packet:
+                smac = packet[Ether].src
+                smac_list.append(smac)
+
+        return smac_list
+
+    def hash_and_remove_duplicates(self, path, pcap_file):
+        # 读取pcap文件
+        pcap_file_list = str(pcap_file).split(',')
+        # 存储不重复hash结果的集合
+        # unique_hashes = set()
+        index = 1
+        pktindex_hash = {}
+        unique_hashes = []
+        for file in pcap_file_list:
+            packets = rdpcap(path + file)
+            # 遍历每个数据包
+            for packet in packets:
+                # 获取报文的二进制表示
+                packet_bytes = bytes(packet)
+                # 计算hash值
+                hash_result = hashlib.sha256(packet_bytes).hexdigest()
+                # pktindex_hash[index] = hash_result
+                # index += 1
+                # 添加hash结果到集合中，集合会自动去重
+                if hash_result not in unique_hashes:
+                    unique_hashes.append(hash_result)
+
+        # 将集合转换为列表
+        # unique_hash_list = list(unique_hashes)
+        #
+        # return unique_hash_list
+        return unique_hashes
+
+    def hash_packets_except_smac(self, pcap_file):
+        # 读取pcap文件
+        packets = rdpcap(pcap_file)
+
+        # 存储hash结果的列表
+        hash_list = []
+
+        # 遍历每个数据包
+        for packet in packets:
+            # 检查是否包含Ether层
+            if Ether in packet:
+                # 获取除了源MAC地址之外的报文字节
+                packet_bytes = bytes(packet[Ether].payload)
+
+                # 计算hash值
+                hash_result = hashlib.sha256(packet_bytes).hexdigest()
+
+                # 将hash结果添加到列表中
+                hash_list.append(hash_result)
+
+        return hash_list
+
+    def parser_8101_r3(self, pcapfile):
+        self.parser_pcapfile(pcapfile)
+        """
+              2024-01-23新增
+              """
+        padding_dict = {}
+        pkt_index = 0
+        for i in self.pkts:
+            # print(i.show())
+            pkt_index += 1
+            if not i.haslayer(Raw):
+                # padding_dict[pkt_index] = '0' * 48
+                pass
+            else:
+                if str(binascii.hexlify(i[Raw].load), encoding="utf-8").lower().startswith('d1110201') or str(
+                        binascii.hexlify(i[Raw].load), encoding="utf-8").lower().startswith('d1110203') or str(
+                        binascii.hexlify(i[Raw].load), encoding="utf-8").lower().startswith('d1110221') or str(
+                        binascii.hexlify(i[Raw].load), encoding="utf-8").lower().startswith('d11102fe') or str(
+                        binascii.hexlify(i[Raw].load), encoding="utf-8").lower().startswith('d1110301') or str(
+                        binascii.hexlify(i[Raw].load), encoding="utf-8").lower().startswith('d1110501'):
+                    padding_dict[pkt_index] = i[Raw].load
+        return padding_dict
+
+    def bj_make(self, pcapfile, acl_starttime=0, acl_endtime=0):
+        """
+        根据pcapfile返回该pcap包含的流量大小，以及首包和尾部报间隔时间、和收报到达时间；当acl相关时间参数不为0也要同步返回对应的距离1970.1.1的s
+        :param pcapfile:
+        :param acl_starttime:
+        :param acl_endstart:
+        :return:[pcap文件中尾报和首包间隔时长,pcap文件中所有包的字节数相加后M表示,pcap第一个包到达时间unix,传递的规则中starttime转换成unix(未传则为0),传递的规则中endtime转换成unix(未传则为0)]
+                ps:当包为空，则返回0,0,0
+        """
+        self.parser_pcapfile(pcapfile)
+        if len(self.pkts) == 0:
+            return 0, 0, 0
+        arrive_time_first = self.pkts[0].time
+        arrive_time_last = self.pkts[-1].time
+        arrive_interval_time = arrive_time_last - arrive_time_first
+        all_flow_byte = 0
+        for i in range(len(self.pkts)):
+            all_flow_byte += self.pkts[i].__len__()
+        all_flow_m = all_flow_byte / 1024 / 1024
+        if acl_starttime:
+            time_get = datetime.datetime.strptime(
+                "%s" % acl_starttime, "%Y.%m.%d-%H:%M:%S")
+            acl_starttime_unix = time.mktime(time_get.timetuple())
+        else:
+            acl_starttime_unix = acl_starttime
+
+        if acl_endtime:
+            time_get = datetime.datetime.strptime(
+                "%s" % acl_endtime, "%Y.%m.%d-%H:%M:%S")
+            acl_endtime_unix = time.mktime(time_get.timetuple())
+        else:
+            acl_endtime_unix = acl_endtime
+
+        return arrive_interval_time, all_flow_m, arrive_time_first
+
+    def cli_time_epoc_switch(self, time1, format=0, interval_time=0):
+        """
+        设备时间和unix时间相互转换，并且增加上间隔时间
+        :param time1: 要不unix，要不就是设备系统时间
+        :param format:0:返回设备时间格式，1返回unix时间
+        :param interval_time: 以秒为单位，在time1的基础上增加该时长
+        :return:
+        """
+        if '-' in str(time1):
+            time_get = datetime.datetime.strptime(
+                "%s" % time1, "%Y.%m.%d-%H:%M:%S")
+            time1_unix = time.mktime(time_get.timetuple())
+            time1_unix_interval = time1_unix + int(interval_time)
+        else:
+            time1_unix_interval = time1 + int(interval_time)
+        if not format:
+            time2 = datetime.datetime.fromtimestamp(time1_unix_interval)
+            device_time = time2.strftime("%Y.%m.%d-%H:%M:%S")
+            return device_time
+        else:
+            return time1_unix_interval
+
+    def bj_net_flow(self, configName):
+        simpleType = {}
+        pkt_index = 0
+        for i in self.pkts:
+            common = confignetflow.netflow(configName).getNetflow("common")
+            netflowv4 = confignetflow.netflow(configName).getNetflow("netflow_v4")
+            netflowv6 = confignetflow.netflow(configName).getNetflow("netflow_v6")
+            netflowv4Size = int(netflowv4.pop("size"))
+            netflowv6Size = int(netflowv6.pop("size"))
+
+            pkt_index += 1
+            flow_info = str(binascii.hexlify(bytes(i)),encoding="utf-8")
+            # print(len(flow_info))
+            comvalue = {}
+            startwith = 0
+            v4_flw = 0
+            v6_flw = 0
+            for key in common:
+                type = None if len(common[key].split(',')) == 2 else common[key].split(',')[2]
+                comvalue[key] =self.formatChange(flow_info[int(common[key].split(',')[0])*2:(int(common[key].split(',')[0])+int(common[key].split(',')[1]))*2],type)
+            for flw_cnt in range(int(comvalue["fl_cnt"])):
+                comvalue['first_zx_ip_ver'] = self.formatChange(flow_info[(int(netflowv4["zx_ip_ver"].split(',')[0])+startwith) * 2:(int(
+                            netflowv4["zx_ip_ver"].split(',')[0]) + int(netflowv4["zx_ip_ver"].split(',')[1])+startwith) * 2], "dec")
+                if comvalue['first_zx_ip_ver'] == 4:
+                    for netflow in netflowv4:
+                        typeva = None if len(netflowv4[netflow].split(',')) == 2 else netflowv4[netflow].split(',')[2]
+                        comvalue["{}{}".format(netflow,flw_cnt)] = self.formatChange(flow_info[(int(netflowv4[netflow].split(',')[0])+startwith) * 2:(int(
+                            netflowv4[netflow].split(',')[0]) + int(netflowv4[netflow].split(',')[1])+startwith) * 2], typeva)
+                    startwith += netflowv4Size
+                    v4_flw += 1
+                elif comvalue['first_zx_ip_ver'] == 6:
+                    for netflow in netflowv6:
+                        typeva = None if len(netflowv6[netflow].split(',')) == 2 else netflowv6[netflow].split(',')[
+                            2]
+                        comvalue["{}{}".format(netflow,flw_cnt)] = self.formatChange(flow_info[(int(netflowv6[netflow].split(',')[0])+startwith) * 2:(int(netflowv6[netflow].split(',')[0]) + int(netflowv6[netflow].split(',')[1])+startwith) * 2], typeva)
+                    startwith += netflowv6Size
+                    v6_flw += 1
+                comvalue["v4_flow_count"]=  v4_flw
+                comvalue["v6_flow_count"] = v6_flw
+                comvalue["cal_len"] = int(v4_flw)*netflowv4Size + int(v6_flw)*netflowv6Size + 46 +4
+                simpleType[pkt_index] = comvalue
+            # if pkt_index == 1 :break
+        return simpleType
+
+    def parser_netflow_packet(self, info_all):
+        zx_postive_bytes_all = 0
+        zx_postive_pkts_all = 0
+        zx_reverse_bytes_all = 0
+        zx_reverse_pkts_all = 0
+        for item in info_all.values():
+            n = item["fl_cnt"]
+            for i in range(n):
+                zx_postive_bytes_all += item.get(f"zx_postive_bytes{i}", 0)
+                zx_postive_pkts_all += item.get(f"zx_postive_pkts{i}", 0)
+                zx_reverse_bytes_all += item.get(f"zx_reverse_bytes{i}", 0)
+                zx_reverse_pkts_all += item.get(f"zx_reverse_pkts{i}", 0)
+        return  zx_postive_bytes_all,zx_postive_pkts_all,zx_reverse_bytes_all,zx_reverse_pkts_all
+    
+    
+    def formatChange(self,value,type=None):
+        if str(type).lower() == 'ipv4':
+            result = ".".join(str(int(value, 16) >> i & 0xFF) for i in (24, 16, 8, 0))
+        elif str(type).lower() == 'ipv6':
+            result = ":".join(re.findall(r'\w{4}', value))
+        elif str(type).lower() == 'dec':
+            result = int(value,16)
+        elif str(type).lower() == 'time':
+            # print(value)
+            time2 = datetime.datetime.fromtimestamp(int(value,16))
+            result = time2.strftime("%Y.%m.%d-%H:%M:%S")
+        elif str(type).lower() == 'mac':
+            result = "-".join(re.findall(r'\w{2}', value))
+        elif str(type).lower() == 'pro':
+            result = ID_TO_PRO[int(value,16)]
+        else:
+            result = value
+        return result
+
+    def v6JianToQuan(self, v6Address):
+        if "::" not in v6Address:
+            return v6Address
+        v6List = str(v6Address).split("::")
+        if "" in v6List:  # 代表在前或后出现::
+            befAft = v6List.index("")  # 0或1
+            v6value = [x for x in v6List[1].split(':')]
+            v6Zero = ['0000' for _ in range(8 - len(v6value))]
+            if befAft:
+                v6value = ["{:0>4}".format(x) for x in v6List[0].split(':')]
+                v6Zero = ['0000' for _ in range(8 - len(v6value))]
+                v6All = v6value + v6Zero
+            else:
+                v6value = ["{:0>4}".format(x) for x in v6List[1].split(':')]
+                v6Zero = ['0000' for _ in range(8 - len(v6value))]
+                v6All = v6Zero + v6value
+
+        else:
+            v6valuePre = ["{:0>4}".format(x) for x in v6List[0].split(':')]
+            v6valueSuf = ["{:0>4}".format(x) for x in v6List[1].split(':')]
+            v6Zero = ['0000' for _ in range(8 - len(v6valuePre + v6valueSuf))]
+            v6All = v6valuePre + v6Zero + v6valueSuf
+        return ":".join(v6All)
+
+    def changeVlanType(self,path=None):
+        path = "C:\\Users\\peiwe\\Desktop\\1URFv4_SELF\\Resource\\Business\\raw_packets"
+        vlanchange = []
+        for home, folder, files in os.walk(path):
+            if "tcc" in home: continue
+            for file in files:
+                if ".pcap" not in file or ".bak20240703" in file: continue
+                pkindex = 0
+                index = []
+                value = []
+                self.parser_pcapfile(home + "\\" + file)
+                for pkt in self.pkts:
+                    pkindex += 1
+                    if hex(pkt['Ether'].type) == '0x88a8' or hex(pkt['Ether'].type) == '0x9100':
+                        index.append(str(pkindex))
+                        pkt['Ether'].type = int('0x8100',16)
+                    value.append(pkt)
+                if index:
+                    wrpcap("{}\\{}".format(home, file), value)
+                    # os.popen("copy {}\\{} {}\\{}.bak20240703".format(home,file,home,file))
+                    vlanchange.append(home + "\\" + file)  # +" index {}".format(",".join(index)))
+        return vlanchange
+
+    def changeTcpchksum(self,path=None):
+        vlanchange = []
+        path = "C:\\Users\\peiwe\\Desktop\\tcpchecksum"
+        for home,folder,files in os.walk(path):
+            if "tcc" in home:continue
+            for file in files:
+                if ".pcap" not in file or ".bak20240703" in file: continue
+                pkindex = 0
+                index = []
+                value = []
+                self.parser_pcapfile(home+"\\"+file)
+                for pkt in self.pkts:
+                    pkindex += 1
+                    if pkindex == 1:
+                        if pkt.haslayer(TCP):
+                            if hex(pkt['TCP'].chksum) == '0xffff':
+                                index.append(str(pkindex))
+                                pkt['TCP'].chksum = int('0x0000',16)
+                                print(pkt.show())
+                    value.append(pkt)
+
+                if index :
+                    print(home + "\\" + file)
+                    wrpcap("{}\\{}".format(home, file),value)
+                    # os.popen("copy {}\\{} {}\\{}.bak20240703".format(home,file,home,file))
+                    vlanchange.append(home+"\\"+file)#+" index {}".format(",".join(index)))
+        return vlanchange
+
+    def filter(self, path=None):
+        vlanchange = []
+        path = "C:\\Users\\peiwe\\Desktop"
+        for home, folder, files in os.walk(path):
+            if "tcc" in home: continue
+            for file in files:
+                if ".pcap" not in file: continue
+                pkindex = 0
+                index = []
+                value = []
+                self.parser_pcapfile(home + "\\" + file)
+                for pkt in self.pkts:
+                    pkindex += 1
+                    if pkt.haslayer(RADIUS):
+                        # if hex(pkt['TCP'].chksum) == '0xffff':
+                        index.append(str(pkindex))
+                        #     pkt['TCP'].chksum = int('0x0000', 16)
+                        #     print(pkt.show())
+                        value.append(pkt)
+
+                if index:
+                    print(home + "\\" + file)
+                    os.popen("copy {}\\{} {}\\{}.bak20240703".format(home,file,home,file))
+                    wrpcap("{}\\{}".format(home, file), value)
+                    # os.popen("copy {}\\{} {}\\{}.bak20240703".format(home,file,home,file))
+                    vlanchange.append(home + "\\" + file)  # +" index {}".format(",".join(index)))
+        return vlanchange
+
+    def convert_to_xx00(self,input_string):
+        byte_array = bytearray(input_string,'utf-8')
+        hex_string = byte_array.hex()
+        split_hex = [hex_string[i:i+2] for i in range(0,len(hex_string),2)]
+        final_result ="\\x" + '\\x'.join(split_hex)
+        return final_result
+
+    def change(self,path,offset,step,newvalue,sep='win',mode="change",newvaluetype="int"):
+        home,file = os.path.split(path)
+        sep = '\\' if 'win' in str(sep).lower() else '/'
+        value = []
+        with  open(home + sep + file, 'rb') as fi:
+            hello1 = dpkt.pcap.Reader(fi)
+            for timestamp, pkt in hello1:
+
+                dest_data = b''
+                hello = str(binascii.hexlify(raw(pkt)),encoding='utf-8')
+                # print(hello)
+                # offset = 34 if hello[24:28] == '0800' else 54
+                newvalue_qq = "{:>0{}}".format(hex(newvalue)[2:],step*2) if newvaluetype != "str" else "".join(self.mult_bytes_to_one_byte(step,self.str_process(newvalue)))
+                if mode == "change":
+                    #newhello = hello[0:offset*2]+"{:>0{}}".format(hex(newvalue)[2:],step*2)+hello[(offset+step)*2:]
+                    newhello = hello[0:offset*2]+ newvalue_qq +hello[(offset+step)*2:]
+                elif mode == "add":
+                    newhello = hello[0:offset * 2] + newvalue_qq + hello[( offset) * 2:]
+                elif mode == "inc":
+                    newhello = hello[0:offset * 2]+ hello[(offset+step) * 2:]
+                newhelloList = [newhello[x:x+2] for x in range(0,len(newhello),2)]
+                for dest in newhelloList:  # 主要是对字符串转为符合网络传送的bytes格式
+                    dest_t = int(str(dest), 16)
+                    dest_data += struct.pack('B', dest_t)
+                value.append(dest_data)
+            if value:
+                wrpcap("{}{}new_{}".format(home, sep, file), value)
+            else:
+                wrpcap("{}{}new_{}".format(home, sep, file), value)
+
+    def changeStrip(self,path,offset,step,newvalue,sep='win',mode="change",newvaluetype="int"):
+        home,file = os.path.split(path)
+        sep = '\\' if 'win' in str(sep).lower() else '/'
+        value = []
+        change_list=[1,2,3]
+        pktindex = 0
+        with  open(home + sep + file, 'rb') as fi:
+            hello1 = dpkt.pcap.Reader(fi)
+            for timestamp, pkt in hello1:
+                pktindex += 1
+                dest_data = b''
+                hello = str(binascii.hexlify(raw(pkt)),encoding='utf-8')
+                # if hello[24:28] == '0800':
+                #     step=38
+                # elif hello[24:28] == "86dd":
+                #     step = 58
+                # print(hello)
+                # offset = 34 if hello[24:28] == '0800' else 54
+                if pktindex in change_list:
+                    newvalue_qq = "{:>0{}}".format(hex(newvalue)[2:],step*2) if newvaluetype != "str" else "".join(self.mult_bytes_to_one_byte(step,self.str_process(newvalue)))
+                    if mode == "change":
+                        #newhello = hello[0:offset*2]+"{:>0{}}".format(hex(newvalue)[2:],step*2)+hello[(offset+step)*2:]
+                        newhello = hello[0:offset*2]+ newvalue_qq +hello[(offset+step)*2:]
+                    elif mode == "add":
+                        newhello = hello[0:offset * 2] + newvalue_qq + hello[( offset) * 2:]
+                    elif mode == "inc":
+                        newhello = hello[0:offset * 2]+ hello[(offset+step) * 2:]
+                    newhelloList = [newhello[x:x+2] for x in range(0,len(newhello),2)]
+                    for dest in newhelloList:  # 主要是对字符串转为符合网络传送的bytes格式
+                        dest_t = int(str(dest), 16)
+                        dest_data += struct.pack('B', dest_t)
+                    value.append(dest_data)
+                else:
+                    value.append(pkt)
+            if value:
+                wrpcap("{}{}new_{}".format(home, sep, file), value)
+            else:
+                wrpcap("{}{}new_{}".format(home, sep, file), value)
+
+    def add_crc(self,path="C:\\Users\\peiwe\\Desktop\\test", sep="win"):
+        sep = '\\' if 'win' in str(sep).lower() else '/'
+        for home, folder, files in os.walk(path):
+            for file in files:
+                if "123.pcap" not in file: continue
+                pkindex = 0
+                index = []
+                value = []
+                with  open(home + sep + file, 'rb') as fi:
+                    hello1 = dpkt.pcap.Reader(fi)
+                    for timestamp, pkt in hello1:
+                        dest_data = b''
+                        pkindex += 1
+                        cc = str(binascii.hexlify(pkt), encoding="utf-8")[0:-8]
+                        ddd = bytes(bytes(str(binascii.hexlify(pkt), encoding="utf-8"), encoding="utf-8"))[0:-8]
+                        crc = hex(binascii.crc32(binascii.a2b_hex(ddd)) & 0xffffffff)
+                        crc_quan = "{:0>8}".format(crc[2:])
+                        crc_quan_two = [crc_quan[i:i + 2] for i in range(0, len(crc_quan), 2)]
+                        crc_fin = "".join(list(reversed(crc_quan_two)))
+                        # print(ddd + bytes(crc_fin,encoding="utf-8"))
+                        add_crc_packet = cc + crc_fin
+                        newhelloList = [add_crc_packet[x:x + 2] for x in range(0, len(add_crc_packet), 2)]
+                        print(newhelloList)
+                        for dest in newhelloList:  # 主要是对字符串转为符合网络传送的bytes格式
+                            dest_t = int(str(dest), 16)
+                            dest_data += struct.pack('B', dest_t)
+                        value.append(dest_data)
+                if value:
+                    wrpcap("{}{}new_{}".format(home, sep, file), value)
+                else:
+                    wrpcap("{}{}new_{}".format(home, sep, file), value)
+
+    def get_string_weizhi(self,path,value,sep='win'):
+        """
+
+        :param path:
+        :param value: 为16进制的数据
+        :param sep:
+        :return:
+        """
+        home,file = os.path.split(path)
+        sep = '\\' if 'win' in str(sep).lower() else '/'
+        index_value = []
+        index_dns={}   #唯一的dns信息
+        index_dns_org = {}  #所有的dns信息
+        index = 0
+        bytes_count={} #需要统计的包
+        dns_count=0
+
+        with  open(home + sep + file, 'rb') as fi:
+            hello1 = dpkt.pcap.Reader(fi)
+            for timestamp, pkt in hello1:
+                index += 1
+                dest_data = b''
+                hello = str(binascii.hexlify(raw(pkt)),encoding='utf-8')
+                # print(hello)
+                weizhi = hello.find(value)
+                # print(weizhi)
+                if  weizhi != -1 and weizhi<443:
+                    index_value.append(index)
+                    index_dns_org[index] = bytes.fromhex(hello[weizhi - 22:weizhi + 6]).decode("utf-8")
+                    if bytes.fromhex(hello[weizhi - 22:weizhi + 6]).decode("utf-8") in index_dns.values():
+                        bytes_count[index] = len(hello)//2 +4
+                    else:
+                        bytes_count[index] = len(hello) // 2 + 4
+                        index_dns[index] = bytes.fromhex(hello[weizhi - 22:weizhi + 6]).decode("utf-8")
+                        dns_count += 1
+                if dns_count == 10:break
+        return index_dns_org,index_dns,bytes_count
+
+    def str_process(self, data):
+        """
+        针对字符串内容进行处理，主要是登录用到的用户名,把其转为ASCII
+        :param data:
+        :return:对应字符的ASCII列表
+        """
+        a = []
+        for i in data:
+            # 转为对应的ascii码
+            # ascii_value = ord(str(i))
+            # 临时处理0不进行转换
+            # ascii_value = ord(str(i)) if str(i) != '0' else int(i)
+            ascii_value = ord(str(i)) if str(i) != '0' else '48' #为应对ascii 0 对应的ascii的值为48
+            ascii_value = ord(str(i)) if str(i) != '0' else '48'  # 为应对ascii 0 对应的ascii的值为48
+            a.append(str(ascii_value))
+            # a.append(hex(int(str(ascii_value))))
+        # print(a) #调试专用
+        return  a
+
+    def mult_bytes_to_one_byte(self, bytecounts, data, is_hex=False):
+        """
+        针对存在某个值对应的字节数字为多个的时候，需要针对数据实际占有字节数和帧格式中的字节个数不匹配需要考虑用0代替
+        :param bytecounts: 帧格式中分配的字节数
+        :param data: 实际的数据
+        :return: 帧格式中每个字段的值 [a,b,c]
+        """
+        if is_hex:
+            if int(bytecounts) == 1:
+                data1 = data if len(data) == 2 else "0" + str(data)
+                return data1
+            else:
+                if isinstance(data, list):
+                    tmp = []
+                    for i in data:
+                        data1 = data if len(data) == 2 else "0" + str(data)
+                        tmp.append(data1)
+                    data_hex = ''.join(tmp)
+                else:
+                    # data1 = data if len(data) == bytecounts*2 else "0" + str(data)
+                    data_hex = data
+                # print(data_hex)
+                # 先对实际数据进行处理，使得和其占用字节数进行对其 不足用0填充
+                if len(data_hex) < int(bytecounts) * 2:
+                    cha = int(bytecounts) * 2 - len(data_hex)
+                    # new_data_hex = data_hex + '0' * cha
+                    new_data_hex = '0' * cha + data_hex
+                else:
+                    new_data_hex = data_hex
+        else:
+            if int(bytecounts) == 1:
+                return self.dec_to_hex(data[0])
+            # 先转为16进制
+            if isinstance(data, list):
+                tmp = []
+                for i in data:
+                    tmp.append(self.dec_to_hex(i))
+                data_hex = ''.join(tmp)
+            else:
+                data_hex = self.dec_to_hex(data)
+            # print(data_hex)
+            # 先对实际数据进行处理，使得和其占用字节数进行对其 不足用0填充
+            if len(data_hex) < int(bytecounts) * 2:
+                cha = int(bytecounts) * 2 - len(data_hex)
+                # new_data_hex = data_hex + '0' * cha
+                new_data_hex = '0' * cha + data_hex
+            else:
+                new_data_hex = data_hex
+            # print(new_data_hex)  # 调试用
+            # print(re.findall(r'\w{2}', new_data_hex)) # 调试用
+            # 对新的数据进行按长度2进行分割，返回列表
+        return re.findall(r'\w{2}', new_data_hex)
+
+    def dec_to_hex(self, data):
+        """
+        10进制转为16进制，且去掉0x内容,且保证输出的都是两位
+        :param data: 普通内容
+        :return:
+        """
+
+        num = int(data)
+        mid = []
+        while True:
+            if num == 0:
+                break
+            num, rem = divmod(num, 16)
+            mid.append(base[rem])
+        a = ''.join([str(x) for x in mid[::-1]])
+        if len(a) == 1 and a:
+            b = '0' + str(a)
+        elif not a:
+            b = '00'
+        else:
+            b = a
+        return b
+
+    # def getcontent(self,path="C:\\Users\\peiwe\\Desktop\\test",sep="win"):
+    #     home, file = os.path.split(path)
+    #     sep = '\\' if 'win' in str(sep).lower() else '/'
+    #     value = []
+    #     pktindex = 0
+    #     with  open(home + sep + file, 'rb') as fi:
+    #         hello1 = dpkt.pcap.Reader(fi)
+    #         for timestamp, pkt in hello1:
+    #             pktindex += 1
+    #             hello = str(binascii.hexlify(raw(pkt)), encoding='utf-8')
+    #             print(hello)
+    def sniscanner(self,path="C:\\Users\\peiwe\\Desktop\\test",sep="win",sni_len_filter=64):
+        home, file = os.path.split(path)
+        sep = '\\' if 'win' in str(sep).lower() else '/'
+        value = []
+        change_list = [1, 2, 3]
+        pktindex = 0
+        with  open(home + sep + file, 'rb') as fi:
+            hello1 = dpkt.pcap.Reader(fi)
+            sni_dict = {}
+            value_pkt = []
+            for timestamp, pkt in hello1:
+                sni_dict_1 = {}
+                pktindex += 1
+                start = 0
+                end = len(pkt)
+                # print(pkt)
+                for index in range(len(pkt)-9):
+                    value = pkt[start:start + 9]
+                    ext_type,ext_len,sni_list,sni_type,sni_len = struct.unpack("!3HBH",value)
+                    # print(ext_type,ext_len,sni_len)
+                    if ext_type == 0 and ext_len-sni_len == 5 and sni_len !=0:
+                        # sni_servername = "".join(list(struct.unpack(">%sc"%sni_len,sni_len,pkt[(start+9),(start+9+sni_len)])))
+                        sni_start = start+9
+                        sni_end = start+9+sni_len
+                        sni_servername = "".join([i.decode() for i in struct.unpack(">%sc"%sni_len,pkt[sni_start:sni_end])])
+                        # print(struct.unpack(">%sc"%sni_len,pkt[sni_start:sni_end]))
+                        sni_dict_1[start] = [sni_servername,len(sni_servername),len(pkt)]
+                        #{offset:[sni_name,sni_len,pkt_len]}
+                        start+= 1
+                        if len(sni_servername) >= sni_len_filter:
+                            value_pkt.append(pkt)
+                    else:
+                        start += 1
+                sni_dict[pktindex]=sni_dict_1
+                # {pktindex:{offset:[sni_name,sni_len,pkt_len]}}
+            if value_pkt:
+                wrpcap("{}{}new_{}".format(home, sep, file), value_pkt)
+            return sni_dict
+
+    def snichange(self,path="C:\\Users\\peiwe\\Desktop\\test",newvalue=1,step=1,newvaluetype="str",mode="change",sep="win",offset=None):
+        home, file = os.path.split(path)
+        sep = '\\' if 'win' in str(sep).lower() else '/'
+        value = []
+        # change_list = [1, 2, 3,5,7,11,13,14,15,16,18,20,22,23,25,27,28,29,30,31] #==ali_dns 483
+        # change_list = [1,2,3]
+        change_list = [1]
+        pktindex = 0
+        with  open(home + sep + file, 'rb') as fi:
+            hello1 = dpkt.pcap.Reader(fi)
+            sni_dict = {}
+            for timestamp, pkt in hello1:
+                sni_dict_1 = {}
+                pktindex += 1
+                start = 0
+                end = len(pkt)
+                dest_data = b''
+                hello = str(binascii.hexlify(raw(pkt)), encoding='utf-8')
+                # print(pkt)
+                if pktindex in change_list:
+                    for index in range(len(pkt)-9):
+                        value1 = pkt[start:start + 9]
+                        ext_type,ext_len,sni_list,sni_type,sni_len = struct.unpack("!3HBH",value1)
+                        # print(ext_type,ext_len,sni_len)
+                        if ext_type == 0 and ext_len-sni_len == 5 and sni_len:
+                            # sni_servername = "".join(list(struct.unpack(">%sc"%sni_len,sni_len,pkt[(start+9),(start+9+sni_len)])))
+                            sni_start = start+9
+                            sni_end = start+9+sni_len
+                            sni_servername = "".join([i.decode() for i in struct.unpack(">%sc"%sni_len,pkt[sni_start:sni_end])])
+                            # print(struct.unpack(">%sc"%sni_len,pkt[sni_start:sni_end]))
+                            sni_dict_1[start] = [sni_servername,len(sni_servername),len(pkt)]
+                            #{offset:[sni_name,sni_len,pkt_len]}
+                            break
+                        else:
+                            start += 1
+                    if not sni_dict_1:continue
+                    sni_dict[pktindex]=sni_dict_1
+                    # {pktindex:{offset:[sni_name,sni_len,pkt_len]}}
+                    offset = start if not offset else offset
+                    # print(offset)
+                    if pktindex in change_list:
+                        newvalue_qq = "{:>0{}}".format(hex(newvalue)[2:], step * 2) if newvaluetype != "str" else "".join(
+                            self.mult_bytes_to_one_byte(step, self.str_process(newvalue)))
+                        if mode == "change":
+                            # newhello = hello[0:offset*2]+"{:>0{}}".format(hex(newvalue)[2:],step*2)+hello[(offset+step)*2:]
+                            newhello = hello[0:offset * 2] + newvalue_qq + hello[(offset + step) * 2:]
+                        elif mode == "add":
+                            newhello = hello[0:offset * 2] + newvalue_qq + hello[(offset) * 2:]
+                        elif mode == "inc":
+                            newhello = hello[0:offset * 2] + hello[(offset + step) * 2:]
+                        newhelloList = [newhello[x:x + 2] for x in range(0, len(newhello), 2)]
+                        for dest in newhelloList:  # 主要是对字符串转为符合网络传送的bytes格式
+                            dest_t = int(str(dest), 16)
+                            dest_data += struct.pack('B', dest_t)
+                        value.append(dest_data)
+                else:
+                    value.append(pkt)
+            if value:
+                wrpcap("{}{}new_{}".format(home, sep, file), value)
+            else:
+                wrpcap("{}{}new_{}".format(home, sep, file), value)
+
+    def generate_random_urls(self,count):
+        for _ in range(count):
+            random_uuid = uuid.uuid4()
+            hex_str = random_uuid.hex[-12:]
+            yield "{0}".format(hex_str)
+    def str_bytes(self,str_con_list):
+        dest_data = b''
+        for dest in str_con_list:  # 主要是对字符串转为符合网络传送的bytes格式
+            dest_t = int(str(dest), 16)
+            dest_data += struct.pack('B', dest_t)
+        return dest_data
+
+    def make_1000(self,path="C:\\Users\\peiwe\\Desktop\\test",sep="win",step=10,offset=1802,count=100):
+        home, file = os.path.split(path)
+        sep = '\\' if 'win' in str(sep).lower() else '/'
+        with  open(home + sep + file, 'rb') as fi:
+            hello1 = dpkt.pcap.Reader(fi)
+            for timestamp, pkt in hello1:
+                hello = str(binascii.hexlify(raw(pkt)), encoding='utf-8')
+                break
+            newvalue_iter = self.generate_random_urls(count)
+            value = []
+            for newvalue in newvalue_iter:
+                dest_data = b''
+                newvalue_qq =  "".join( self.mult_bytes_to_one_byte(step, self.str_process(newvalue)))
+                newhello = hello[0:offset * 2] + newvalue_qq + hello[(offset + step) * 2:]
+                # newhello_en = newhello.encode()
+                newhelloList = [newhello[x:x + 2] for x in range(0, len(newhello), 2)]
+                dest_data = self.str_bytes(newhelloList)
+                value.append(dest_data)
+            wrpcap("{}{}new_{}".format(home, sep, file), value)
+
+
+    def bj_net_flow_1(self, configName):
+        simpleType = {}
+        pkt_index = 0
+
+
+        for i in self.pkts:
+            common = confignetflow.netflow(configName).getNetflow("common")
+            netflowv4 = confignetflow.netflow(configName).getNetflow("netflow_v4")
+            netflowv6 = confignetflow.netflow(configName).getNetflow("netflow_v6")
+            netflowv4Size = int(netflowv4.pop("size"))
+            netflowv6Size = int(netflowv6.pop("size"))
+
+            pkt_index += 1
+            flow_info = str(binascii.hexlify(bytes(i)),encoding="utf-8")
+            # print(len(flow_info))
+            comvalue = {}
+            startwith = 0
+            v4_flw = 0
+            v6_flw = 0
+            for key in common:
+                type = None if len(common[key].split(',')) == 2 else common[key].split(',')[2]
+                #print(type)
+                comvalue[key] =self.formatChange(flow_info[int(common[key].split(',')[0])*2:(int(common[key].split(',')[0])+int(common[key].split(',')[1]))*2],type)
+            for flw_cnt in range(int(comvalue["fl_cnt"])):
+                comvalue['first_zx_ip_ver'] = self.formatChange(flow_info[(int(netflowv4["zx_ip_ver"].split(',')[0])+startwith) * 2:(int(
+                            netflowv4["zx_ip_ver"].split(',')[0]) + int(netflowv4["zx_ip_ver"].split(',')[1])+startwith) * 2], "dec")
+                if comvalue['first_zx_ip_ver'] == 4:
+                    for netflow in netflowv4:
+                        typeva = None if len(netflowv4[netflow].split(',')) == 2 else netflowv4[netflow].split(',')[2]
+                        print(typeva)
+                        comvalue["{}{}".format(netflow,flw_cnt)] = self.formatChange(flow_info[(int(netflowv4[netflow].split(',')[0])+startwith) * 2:(int(
+                            netflowv4[netflow].split(',')[0]) + int(netflowv4[netflow].split(',')[1])+startwith) * 2], typeva)
+                        print(netflow)
+                        print(comvalue)
+                    startwith += netflowv4Size
+                    v4_flw += 1
+                elif comvalue['first_zx_ip_ver'] == 6:
+                    for netflow in netflowv6:
+                        typeva = None if len(netflowv6[netflow].split(',')) == 2 else netflowv6[netflow].split(',')[
+                            2]
+                        comvalue["{}{}".format(netflow,flw_cnt)] = self.formatChange(flow_info[(int(netflowv6[netflow].split(',')[0])+startwith) * 2:(int(netflowv6[netflow].split(',')[0]) + int(netflowv6[netflow].split(',')[1])+startwith) * 2], typeva)
+                    startwith += netflowv6Size
+                    v6_flw += 1
+                comvalue["v4_flow_count"]=  v4_flw
+                comvalue["v6_flow_count"] = v6_flw
+                comvalue["cal_len"] = int(v4_flw)*netflowv4Size + int(v6_flw)*netflowv6Size + 46 +4
+                simpleType[pkt_index] = comvalue
+            # if pkt_index == 1 :break
+        return simpleType
+
+
+if __name__ == '__main__':
+    hello = DdevieParsePacket()
+
+    ##jinmy  debug###
+    pcappath = "C:/Users/root/Desktop/1URFv4_BJ_NEW/Resource/Business/ripe_packets/netfow_2.pcap"
+    # netflow = "C:/Users/jinmy/Desktop/netflow"
+    netflow_packet = "C:/Users/root/Desktop/1URFv4_BJ_NEW/Resource/Lib/parseLib/config/netflow_packet"
+    n = hello.parser_pcapfile(pcappath)
+    # print(n)
+
+    b = hello.bj_net_flow(netflow_packet)
+    print(b)
+    zx_postive_bytes_all, zx_postive_pkts_all, zx_reverse_bytes_all, zx_reverse_pkts_all = hello.parser_pcapfile_byte(b)
+    print(zx_postive_bytes_all)
+    print(zx_postive_pkts_all)
+    print(zx_reverse_bytes_all)
+    print(zx_reverse_pkts_all)
+
+    # time1 = time.time()
+    # hello = DdevieParsePacket()
+    # dd = []
+    # for i in ["e2c68.gcp.gvt2.com", "hector.baidu.com", "pss.bdstatic.com", "beacons.gcp.gvt2.com", "content-autofill.googleapis.com", "dns.alidns.com", "docs.qq.com", "p.qlogo.cn", "config.edge.skype.com", "ss2.baidu.com", "oth.str.beacon.qq.com", "clients2.google.com", "ug.baidu.com", "beacons2.gvt2.com", "t13.baidu.com", "userver.upaas.quark.cn", "googleads.g.doubleclick.net", "download.pinyin.sogou.com", "accounts.google.com", "beacons3.gvt2.com", "sp1.baidu.com", "login.psvr.wps.cn", "125.88.187.154", "clientservices.googleapis.com", "tpstelemetry.tencent.com", "help-tower.2345.cc", "play.google.com", "ss1.baidu.com", "pub.idqqimg.com", "edge.microsoft.com", "h.trace.qq.com", "t7.baidu.com", "www.bing.com", "yt3.googleusercontent.com", "www.google.com", "static.doubleclick.net", "b.bdstatic.com", "array609.prod.do.dsp.mp.microsoft.com", "e2c34.gcp.gvt2.com", "beacons.gvt2.com", "ms.bdimg.com", "optimizationguide-pa.googleapis.com", "i.ytimg.com", "beacons4.gvt2.com", "tpc.googlesyndication.com", "report.idqqimg.com", "encrypted-tbn1.gstatic.com", "encrypted-tbn0.gstatic.com", "array608.prod.do.dsp.mp.microsoft.com", "gimg3.baidu.com", "rr3---sn-oguelnle.googlevideo.com", "fclick.baidu.com", "www.baidu.com", "e2c42.gcp.gvt2.com", "www.gstatic.com", "trpcpb.imtt.qq.com", "trpc.gamecenter.qq.com", "api.docer.wpscdn.cn", "nv00.cdn.bcebos.com", "otheve.beacon.qq.com", "yt3.ggpht.com", "www.googleadservices.com", "youtube.com", "ii.gdt.qq.com", "luna-ai.youdao.com", "rr1---sn-oguelnsy.googlevideo.com", "rr1---sn-oguelnzr.googlevideo.com", "jnn-pa.googleapis.com", "ping.pinyin.sogou.com", "t9.baidu.com", "www.youtube.com", "mobile.events.data.microsoft.com", "ss0.baidu.com", "e2c14.gcp.gvt2.com", "hectorstatic.baidu.com", "chinanorth3-0.in.applicationinsights.azure.cn", "sec.sginput.qq.com", "gimg4.baidu.com", "e2c26.gcp.gvt2.com", "msedge.api.cdp.microsoft.com", "hpd.baidu.com", "px.wpk.quark.cn", "www.google.co.jp", "safebrowsing.googleapis.com", "mbd.baidu.com", "v10.events.data.microsoft.com", "wup.browser.qq.com", "id.google.com", "google.com", "fonts.googleapis.com", "honeycomb.wpscdn.cn", "cidian.youdao.com", "125.88.187.210", "gips0.baidu.com", "color.docer.wps.cn", "rr4---sn-oguelnzy.googlevideo.com", "config.pinyin.sogou.com", "rr3---sn-oguelnsr.googlevideo.com", "h5.qzone.qq.com", "ss3.baidu.com", "data.ab.qq.com", "dict.youdao.com", "get.sogou.com", "fonts.gstatic.com"] :
+    #     c = hello.str_process(i)
+    #     dd.append(c)
+    # print(dd)
+    # hello.make_1000("c:\\users\\peiwe\\desktop\\jinghao.pcap","win",12,194,1000000)
+    # # c = hello.changeStrip("c:\\users\\peiwe\\desktop\\https-fonts.gstatic.com-64_levelthan10.pcap",54,2,8198)
+    # # c = hello.snichange("c:\\users\\peiwe\\desktop\\https-fonts.gstatic.com-64_levelthan10.pcap",2,2,"int")
+    # # c = hello.sniscanner("c:\\users\\peiwe\\desktop\\first_packetsp_youtube_1.pcap")
+    # # c = hello.sniscanner("c:\\users\\peiwe\\desktop\\new_than_64.pcap",111)
+    # c = hello.snichange("c:\\users\\peiwe\\desktop\\servername_65.pcap","f",1,"str","change",sep='win',offset=1802)
+    # print(c)
+    # time2 = time.time()
+    # print("耗时%s"%(time2-time1))
+
+    # c = hello.snichange("c:\\users\\peiwe\\desktop\\https-dns.alidns.com-64.pcap", 2, 2, "int")
+    # c = hello.snichange("c:\\users\\peiwe\\desktop\\https_servername_10.pcap",2,2,"int")
+    # print(c)
+    # print(set([a[2] for a in c]))
+    # # hello.changeTcpchksum()
+    # # hello.parser_pcapfile("C:\\Users\\Peiwe\\Desktop\\new_gre.pcap")
+    # # five = hello.extract_five_tuple_from_pcap("C:\\Users\\Peiwe\\Desktop\\151.pcap",list_dict=0,have_mac=1)
+    # # print(five)
+    # # c = hello.changeStrip("C:\\Users\\Peiwe\\Desktop\\R3_ACL.pcap",80,1,16)  # 修改length
+    # # # c = hello.mult_bytes_to_one_byte(9,hello.str_process(".v.qq.com"))
+    # # print(c)
+    #
+    #
+    #
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_151.pcap", 60, 3, 1778)  # 修改length
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_new_151.pcap",97,1,50)  #修改length
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_new_new_151.pcap", 98, 1, 49,mode="inc")  # 修改length
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_151.pcap", 60, 3, 1730)#修改handshark的len
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\151.pcap", 97, 1, 27)  # 修改session_id_len的len
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_151.pcap", 98, 5,10,mode="inc")  # sessid剪掉3字节
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_new_151.pcap", 183, 2, 36)  #
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_new_new_151.pcap", 185, 2, 34)  #
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\new_new_new_new_151.pcap", 188, 2, 31)
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\151.pcap", 194, 1, "s",mode="inc",newvaluetype="str")  # 在session_id内容怎加对应的字节
+    # # hello.change("C:\\Users\\Peiwe\\Desktop\\151.pcap", 197, 1, "_", mode="change",newvaluetype="str")
+    #
+    #
+    # # value = hello.get_string_weizhi("C:\\Users\\Peiwe\\Desktop\\https-sni-1\\https-sni-1\\https-dns.alidns.com-64.pcap","636f6d")
+    # # print(value[0],value[1],value[2])
+    # # print(sum(value[2].values()))
+    #
+    # # # c = hello.changeVlanType()
+    # # # print(c)
+    # # # time.sleep(50)
+    # # d = hello.changeTcpchksum()
+    # # print(d)
+    # # time2 = time.time()
+    # # print("消耗时间{}".format(time2-time1))
+    #
+    path ="C:\\Users\\root\\Desktop\\netfow_3.pcap"
+    a = DdevieParsePacket()
+    flowpkt = a.parser_pcapfile(path)
+    #print(flowpkt)
+    configName = 'netflow_packet'
+    info = a.bj_net_flow(configName)
+    print(info)
+    info1 = a.bj_net_flow_1(configName)
+    print(info1)

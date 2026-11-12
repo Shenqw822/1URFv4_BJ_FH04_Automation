@@ -1,0 +1,59 @@
+*** Settings ***
+Resource          ../Business/variable.txt
+Library           SSHLibrary
+Library           String
+
+*** Variables ***
+
+*** Keywords ***
+OpenConnectionAndLogin
+    [Arguments]    ${alias}    # 服务器别名，用于Switch关键字
+    [Documentation]    ssh remote server
+    ...
+    ...    width参数默认为80，在ssh write命令时，会出现命令行较长导致宽度超过80字符时，自动换行的现象，故需要修改默认值为120。
+    ...
+    ...    此关键字中不可调用Close All Connections，调用该关键字会导致tcpdump抓包操作不能完成。
+    comment    SSHLibrary.Close All Connections
+    Sleep    0.2
+    ${Open_Connection_status}=    run keyword and return status    SSHLibrary.Open Connection    ${ssh_server_ip}    alias=${alias}    port=${ssh_server_port}    width=200    height=500    timeout=1000
+    run keyword if    '${Open_Connection_status}'=='False'    OpenConnectionAndLogin    ${alias}
+    log    ${Open_Connection_status}
+    ${login_status}=    run keyword and return status    SSHLibrary.Login    ${ssh_server_user}    ${ssh_server_password}
+    run keyword if    '${login_status}'=='False'    OpenConnectionAndLogin    ${alias}
+    log    ${login_status}
+    Comment    SSHLibrary.read until    [root@localhost ~]#
+    Comment    ${status}=    run keyword and return status    SSHLibrary.Login    ${ssh_server_user}    ${ssh_server_password}
+    Comment    run keyword if    '${status}'=='False'    OpenConnectionAndLogin
+    [Teardown]
+    RETURN    ${alias}    # 返回服务器别名，用于Switch关键字操作
+
+SwithConnectionAndLog
+    [Arguments]    ${machine}
+    [Documentation]    swith connection
+    Switch Connection    ${${machine}_alias}
+    ${myc}    Get Connection    ${${machine}_alias}
+    log    ${myc.host}
+
+SshExecuteCmd
+    [Arguments]    ${cmd}
+    [Documentation]    ssh execute cmd, check return, 可指定机器
+    OpenConnectionAndLogin    excCmd
+    ${stdout}    ${rc} =    SSHLibrary.Execute Command    ${cmd}    return_rc=${true}
+    Return From Keyword    ${stdout}    ${rc}
+
+SshPutFile
+    [Arguments]    ${machine}    ${src}    ${dest}
+    [Documentation]    ssh执行命令, 判断返回码, 可指定机器
+    SwithConnectionAndLog    ${machine}
+    SSHLibrary.Put File    ${src}    ${dest}
+
+SshMkDir
+    Comment    创建文件夹，用于存取pcap文件
+    OpenConnectionAndLogin    mkdir
+    SshExecuteCmd    'mkdir yw111'
+
+SshGetFile
+    [Arguments]    ${src}    ${dest}
+    [Documentation]    ssh执行命令, 判断返回码, 可指定机器
+    OpenConnectionAndLogin    getfile
+    SSHLibrary.Get File    ${src}    ${dest}

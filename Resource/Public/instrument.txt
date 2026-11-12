@@ -1,0 +1,165 @@
+*** Settings ***
+Resource          sshKeywordSet.txt
+Library           Collections
+Resource          initConfiguration.txt
+Resource          Ddevice.txt
+
+*** Keywords ***
+tcpreplayAndTcpdump
+    [Arguments]    ${saveName}    ${pcapfileName}    ${speedForMbps}    ${durationTime}    ${twoTcpreplay}=0    ${clearStatistics}=1    ${tcpdumpWaitTime}=10    ${tcpdumpFilter}=None    ${tcpreplayPath}=${ssh_server_raw_pcap_path}    # 保存报名|打流报名|打流速率(0代表最快速率,其他非0代表Mbps)|打流时长(0代表burst，非0代表continue）|打流前是否清除计数（默认清除，非1不清除)
+    [Documentation]    实现TCP replay打流；其中
+    ...    保存报名|打流报名|打流速率(0代表最快速率,其他非0代表Mbps)|打流时长(0代表burst，非0代表continue）|2个pcapfile分开用tcpreplay一起打,置1生效(这种情况只支持2个pcapfiel)打流前是否清除计数（默认清除，非1不清除)
+    ...
+    ...    返回根据twoTcpreplay来进行不通返回=1 [txPkt,txByte,txPkt1,txByte1]；=0 txPkt
+    ...
+    ...    time：1t代表打流1次
+    SSHLibrary.Close All Connections
+    Run Keyword If    ${clearStatistics}==1    New Connection Custom
+    Run Keyword If    ${clearStatistics}==1    telnet.write    clear statistics all
+    Run Keyword If    ${clearStatistics}==1    telnet.read until    ${userName1}(config)#
+    Run Keyword If    ${clearStatistics}==1    sleep    2
+    Run Keyword If    ${clearStatistics}==1    compareStastics    ${inportId}    ${outgroup_f_portId_1}    0    0
+    #    ${durationAndLoop}    Set Variable If    ${durationTime}==0    ${EMPTY}    -l0 --duration ${durationTime}
+    ${durationTime}    Convert To String    ${durationTime}
+    ${looptimes}    Replace String    ${durationTime}    t    ${EMPTY}
+    ${durationAndLoop}    Run Keyword If    "${durationTime}"=="0"    Set Variable    ${EMPTY}
+    ...    ELSE IF    't' in "${durationTime}"    Set Variable    -l ${looptimes}
+    ...    ELSE    Set Variable    -l0 --duration ${durationTime}
+    ${speed}    Set Variable If    ${speedForMbps}==0    -t    -M ${speedForMbps}
+    ${pcapFileNameEmpty}    Replace String    ${pcapfileName}    ,    ${SPACE}
+    #    ${twoPcapFileList}    Run Keyword If    ${twoTcpreplay} == 1    Split String    ${pcapfileName}    ,    2
+    ${twoPcapFileList}    Run Keyword If    ${twoTcpreplay} == 1    Split String    ${pcapfileName}    ,
+    ${pcapFileSplitLen}    Run Keyword If    ${twoTcpreplay} == 1    Get Length    ${twoPcapFileList}
+    OpenConnectionAndLogin    alias=tcpreplay
+    SSHLibrary.Write    cd ${tcpreplayPath}
+    OpenConnectionAndLogin    alias=tcpdump
+    Run Keyword If    '${tcpdumpFilter}'!='None'    SSHLibrary.Write    tcpdump -i ${ssh_server_net_port} ${tcpdumpFilter} -Q in -B 32768 -w ${ssh_server_ripe_pcap_path}${saveName}.pcap
+    ...    ELSE    SSHLibrary.Write    tcpdump -i ${ssh_server_net_port} -Q in -B 32768 -w ${ssh_server_ripe_pcap_path}${saveName}.pcap
+    SSHLibrary.Read Until    capture size
+    SSHLibrary.Switch Connection    tcpreplay
+    Run Keyword If    ${twoTcpreplay} == 1    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${twoPcapFileList}[0] 2>/dev/null
+    ...    ELSE    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${pcapFileNameEmpty} 2>/dev/null
+    ${tcpreplayInfo}    SSHLibrary.Read Until    \#
+    ${packetSentList}    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt}    Get From List    ${packetSentList}[0]    0
+    ${txByte}    Get From List    ${packetSentList}[0]    1
+    comment    支持2个pcapfile
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    OpenConnectionAndLogin    alias=tcpreplay1
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    SSHLibrary.Write    cd ${tcpreplayPath}
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${twoPcapFileList}[1] 2>/dev/null
+    ${tcpreplayInfo}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    SSHLibrary.Read Until    \#
+    ${packetSentList}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt1}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    Get From List    ${packetSentList}[0]    0
+    ...    ELSE    Set Variable    ${0}
+    ${txByte1}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    Get From List    ${packetSentList}[0]    1
+    ...    ELSE    Set Variable    ${0}
+    comment    支持3个pcapfile
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    OpenConnectionAndLogin    alias=tcpreplay2
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    SSHLibrary.Write    cd ${tcpreplayPath}
+    ${pcap}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    Evaluate    " ".join(${twoPcapFileList}[2:])
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${twoPcapFileList}[2] 2>/dev/null
+    ${tcpreplayInfo}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    SSHLibrary.Read Until    \#
+    ${packetSentList}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt2}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    Get From List    ${packetSentList}[0]    0
+    ...    ELSE    Set Variable    ${0}
+    ${txByte2}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    Get From List    ${packetSentList}[0]    1
+    ...    ELSE    Set Variable    ${0}
+    comment    支持4个pcapfile
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen}>=4    OpenConnectionAndLogin    alias=tcpreplay3
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    SSHLibrary.Write    cd ${tcpreplayPath}
+    ${pcap}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    Evaluate    " ".join(${twoPcapFileList}[3:])
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${pcap} 2>/dev/null
+    ${tcpreplayInfo}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    SSHLibrary.Read Until    \#
+    ${packetSentList}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt3}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    Get From List    ${packetSentList}[0]    0
+    ...    ELSE    Set Variable    ${0}
+    ${txByte3}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    Get From List    ${packetSentList}[0]    1
+    ...    ELSE    Set Variable    ${0}
+    sleep    ${tcpdumpWaitTime}
+    SSHLibrary.Switch Connection    tcpdump
+    ${crtl_c}    Evaluate    chr(int(3))
+    SSHLibrary.Write Bare    ${crtl_c}
+    ${tcpdumpInfo}    SSHLibrary.Read Until    \#
+    ${packetGetList}    Get Regexp Matches    ${tcpdumpInfo}    .*C(\\S+)\\s+packets? captured.*    1
+    ${rx}    Get From List    ${packetGetList}    0
+    SshGetFile    ${ssh_server_ripe_pcap_path}${saveName}.pcap    ${localRipePcapPath}${saveName}.pcap
+    ${txReturn}    Run Keyword If    ${twoTcpreplay} == 1    Create List    ${txPkt}    ${txByte}    ${txPkt1}    ${txByte1}    ${txPkt2}    ${txByte2}    ${txPkt3}    ${txByte3}
+    ...    ELSE    Set Variable    ${txPkt}    ${${txByte}+${txPkt}*4}
+    SSHLibrary.Close All Connections
+    RETURN    ${rx}    ${txReturn}
+
+tcpreplayAndTcpdump_cg
+    [Arguments]    ${saveName}    ${pcapfileName}    ${speedForMbps}    ${durationTime}    ${twoTcpreplay}=0    ${clearStatistics}=1    ${tcpdumpWaitTime}=8    ${tcpdumpFilter}=None    # 保存报名|打流报名|打流速率(0代表最快速率,其他非0代表Mbps)|打流时长(0代表burst，非0代表continue）|打流前是否清除计数（默认清除，非1不清除)
+    [Documentation]    实现TCP replay打流；其中
+    ...    保存报名|打流报名|打流速率(0代表最快速率,其他非0代表Mbps)|打流时长(0代表burst，非0代表continue）|2个pcapfile分开用tcpreplay一起打,置1生效(这种情况只支持2个pcapfiel)打流前是否清除计数（默认清除，非1不清除)
+    ...
+    ...    返回根据twoTcpreplay来进行不通返回=1 [txPkt,txByte,txPkt1,txByte1]；=0 txPkt
+    Run Keyword If    ${clearStatistics}==1    New Connection Custom
+    Run Keyword If    ${clearStatistics}==1    telnet.write    clear statistics all
+    Run Keyword If    ${clearStatistics}==1    telnet.read until    ${userName1}(config)#
+    Run Keyword If    ${clearStatistics}==1    sleep    2
+    Run Keyword If    ${clearStatistics}==1    compareStastics    ${inportId}    ${outgroup_f_portId_1}    0    0
+    ${durationAndLoop}    Set Variable If    ${durationTime}==0    ${EMPTY}    -l0 --duration ${durationTime}
+    ${speed}    Set Variable If    ${speedForMbps}==0    -t    -M ${speedForMbps}
+    ${pcapFileNameEmpty}    Replace String    ${pcapfileName}    ,    ${SPACE}
+    ${pcapFileNameList}    Split String    ${pcapfileName}    ,
+    #    ${twoPcapFileList}    Run Keyword If    ${twoTcpreplay} == 1    Split String    ${pcapfileName}    ,    2
+    ${twoPcapFileList}    Run Keyword If    ${twoTcpreplay} == 1    Split String    ${pcapfileName}    ,
+    ${pcapFileSplitLen}    Run Keyword If    ${twoTcpreplay} == 1    Get Length    ${twoPcapFileList}
+    OpenConnectionAndLogin    alias=tcpreplay
+    SSHLibrary.Write    cd ${ssh_server_raw_pcap_path}
+    OpenConnectionAndLogin    alias=tcpdump
+    Run Keyword If    '${tcpdumpFilter}'!='None'    SSHLibrary.Write    tcpdump -i ${ssh_server_net_port} ${tcpdumpFilter} -Q in -B 32768 -w ${ssh_server_ripe_pcap_path}${saveName}.pcap
+    ...    ELSE    SSHLibrary.Write    tcpdump -i ${ssh_server_net_port} -Q in -B 32768 -w ${ssh_server_ripe_pcap_path}${saveName}.pcap
+    SSHLibrary.Read Until    capture size
+    SSHLibrary.Switch Connection    tcpreplay
+    Run Keyword If    ${twoTcpreplay} == 1    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${twoPcapFileList}[0]
+    ...    ELSE    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${pcapFileNameEmpty}
+    ${tcpreplayInfo}    SSHLibrary.Read Until    \#
+    ${packetSentList}    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt}    Get From List    ${packetSentList}[0]    0
+    ${txByte}    Get From List    ${packetSentList}[0]    1
+    comment    支持2个pcapfile
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    OpenConnectionAndLogin    alias=tcpreplay1
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    SSHLibrary.Write    cd ${ssh_server_raw_pcap_path}
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${twoPcapFileList}[1]
+    ${tcpreplayInfo}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    SSHLibrary.Read Until    \#
+    ${packetSentList}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt1}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    Get From List    ${packetSentList}[0]    0
+    ...    ELSE    Set Variable    ${0}
+    ${txByte1}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=2    Get From List    ${packetSentList}[0]    1
+    ...    ELSE    Set Variable    ${0}
+    comment    支持3个pcapfile
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    OpenConnectionAndLogin    alias=tcpreplay2
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    SSHLibrary.Write    cd ${ssh_server_raw_pcap_path}
+    ${pcap}    Evaluate    " ".join(${twoPcapFileList}[2:])
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${twoPcapFileList}[2]
+    ${tcpreplayInfo}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    SSHLibrary.Read Until    \#
+    ${packetSentList}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt2}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    Get From List    ${packetSentList}[0]    0
+    ...    ELSE    Set Variable    ${0}
+    ${txByte2}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=3    Get From List    ${packetSentList}[0]    1
+    ...    ELSE    Set Variable    ${0}
+    comment    支持4个pcapfile
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen}>=4    OpenConnectionAndLogin    alias=tcpreplay3
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    SSHLibrary.Write    cd ${ssh_server_raw_pcap_path}
+    ${pcap}    Evaluate    " ".join(${twoPcapFileList}[3:])
+    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    SSHLibrary.Write    tcpreplay ${speed} ${durationAndLoop} -i ${ssh_server_net_port} ${pcap}
+    ${tcpreplayInfo}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    SSHLibrary.Read Until    \#
+    ${packetSentList}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    Get Regexp Matches    ${tcpreplayInfo}    .*Actual:\\s+(\\S+)\\s+packets\\s+\\((\\S+)\\s+bytes.*    1    2
+    ${txPkt3}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    Get From List    ${packetSentList}[0]    0
+    ...    ELSE    Set Variable    ${0}
+    ${txByte3}    Run Keyword If    ${twoTcpreplay} == 1 and ${pcapFileSplitLen} >=4    Get From List    ${packetSentList}[0]    1
+    ...    ELSE    Set Variable    ${0}
+    sleep    ${tcpdumpWaitTime}
+    SSHLibrary.Switch Connection    tcpdump
+    ${crtl_c}    Evaluate    chr(int(3))
+    SSHLibrary.Write Bare    ${crtl_c}
+    ${tcpdumpInfo}    SSHLibrary.Read Until    \#
+    ${packetGetList}    Get Regexp Matches    ${tcpdumpInfo}    .*C(\\S+)\\s+packets? captured.*    1
+    ${rx}    Get From List    ${packetGetList}    0
+    SshGetFile    ${ssh_server_ripe_pcap_path}${saveName}.pcap    ${localRipePcapPath}${saveName}.pcap
+    ${txReturn}    Run Keyword If    ${twoTcpreplay} == 1    Create List    ${txPkt}    ${txByte}    ${txPkt1}    ${txByte1}    ${txPkt2}    ${txByte2}    ${txPkt3}    ${txByte3}
+    ...    ELSE    Set Variable    ${txPkt}    ${${txByte}+${txPkt}*4}
+    SSHLibrary.Close All Connections
+    RETURN    ${rx}    ${txReturn}

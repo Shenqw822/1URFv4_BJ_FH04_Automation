@@ -1,0 +1,111 @@
+*** Settings ***
+Resource          ../Business/variable.txt
+Library           ../Lib/support.py
+Resource          initConfiguration.txt
+Library           Dialogs
+Library           String
+Library           Telnet
+Library           Collections
+
+*** Variables ***
+
+*** Keywords ***
+statistics
+    [Arguments]    ${group}    ${x}    # 统计出口组/入口组流量,${x}:入口组为1，出口组为9
+    sleep    2
+    ${next}=    evaluate    ${x}+1
+    ${byte}=    set variable    ${0}
+    ${pkt}=    set variable    ${0}
+    ${group_len}=    get length    ${group}
+    ${interface_statistics_pkt}=    Create list
+    ${interface_statistics_byte}=    Create list
+    New Connection Custom
+    FOR    ${i}    IN RANGE    ${group_len}
+        ${port}=    get from list    ${group}    ${i}
+        telnet.write    show statistics interface ${port}
+        ${information}=    Telnet.Read Until    ${userName1}(config)#
+        ${statistic_list}=    statistic    ${information}
+        ${single_pkt}=    get from list    ${statistic_list}    ${x}
+        ${single_byte}=    get from list    ${statistic_list}    ${next}
+        ${byte}=    Evaluate    ${byte}+${single_byte}
+        ${pkt}=    Evaluate    ${pkt}+${single_pkt}
+        append to list    ${interface_statistics_pkt}    ${single_pkt}
+        append to list    ${interface_statistics_byte}    ${single_byte}
+    END
+    RETURN    ${interface_statistics_pkt}    ${interface_statistics_byte}    ${pkt}    ${byte}
+
+addGroup
+    [Arguments]    ${flag}    ${group}    ${id}
+    [Documentation]    8332创建入口组和出口组，${flag}为outgroup或ingroup，${group}为成员端口列表，${id}为outgroup或ingroup的id号
+    ${len}=    get length    ${group}
+    FOR    ${i}    IN RANGE    ${len}
+        ${single}=    get from list    ${group}    ${i}
+        ${single}=    convert to string    ${single}
+        New Connection Custom
+        telnet.write    ${flag} ${id} add interface eth ${single}
+        telnet.read
+        telnet.write    show ${flag} ${id}
+        ${information}=    telnet.read
+    END
+    #针对3.0.2问题调整    should contain    ${information}    ${single}
+
+netflowDisable
+    [Documentation]    流统计去使能
+    telnet.write    netflow disable
+    telnet.read
+    telnet.write    show netflow
+    ${infor}=    telnet.read
+    ${show}=    get regexp matches    ${infor}=    state\\s+:\\s+(\\S+)    1
+    run keyword and continue on failure    should be equal    ${show[0]}    disable
+
+statistics_mtu
+    [Arguments]    ${group}    ${x}
+    [Documentation]    \#统计出口组或者入口组的各个端口mtu计数
+    sleep    2
+    ${next}=    evaluate    ${x}+1
+    ${mtu}=    evaluate    ${x}+6
+    ${byte}=    set variable    ${0}
+    ${pkt}=    set variable    ${0}
+    ${group_len}=    get length    ${group}
+    ${interface_statistics_pkt}=    Create list
+    ${interface_statistics_byte}=    Create list
+    New Connection Custom
+    FOR    ${i}    IN RANGE    ${group_len}
+        ${port}=    get from list    ${group}    ${i}
+        telnet.write    show statistics interface ${port}
+        ${information}=    Telnet.Read Until    ${userName1}(config)#
+        ${statistic_list}=    statistic    ${information}
+        ${single_pkt0}=    get from list    ${statistic_list}    ${x}
+        ${single_pkt1}=    get from list    ${statistic_list}    ${mtu}
+        ${single_byte}=    get from list    ${statistic_list}    ${next}
+        ${byte}=    Evaluate    ${byte}+${single_byte}
+        ${pkt}=    Evaluate    ${pkt}+${single_pkt0}+${single_pkt1}
+        ${pkt_total}=    Evaluate    ${single_pkt0}+${single_pkt1}
+        append to list    ${interface_statistics_pkt}    ${pkt_total}
+        append to list    ${interface_statistics_byte}    ${single_byte}
+    END
+    RETURN    ${interface_statistics_pkt}    ${interface_statistics_byte}    ${pkt}    ${byte}
+
+statistics_old
+    [Arguments]    ${group}    ${x}    # 统计出口组/入口组流量,${x}:入口组为1，出口组为9
+    #comment    #计算出口组或者入口组的流量和，${group}出口组、入口组组员，${x}:表示需要计算的项
+    sleep    2
+    ${next}=    evaluate    ${x}+1
+    ${byte}=    set variable    ${0}
+    ${pkt}=    set variable    ${0}
+    ${group_len}=    get length    ${group}
+    FOR    ${i}    IN RANGE    ${group_len}
+        ${port}=    get from list    ${group}    ${i}
+        ${port}=    convert to bytes    ${port}
+        New Connection Custom
+        telnet.write    show statistics interface ${port}
+        ${information}=    telnet.read
+        ${statistic_list}=    statistic    ${information}
+        ${single_pkt}=    get from list    ${statistic_list}    ${x}
+        ${single_pkt}=    convert to bytes    ${single_pkt}
+        ${single_byte}=    get from list    ${statistic_list}    ${next}
+        ${single_byte}=    convert to bytes    ${single_byte}
+        ${byte}=    Evaluate    ${byte}+${single_byte}
+        ${pkt}=    Evaluate    ${pkt}+${single_pkt}
+    END
+    RETURN    ${pkt}    ${byte}

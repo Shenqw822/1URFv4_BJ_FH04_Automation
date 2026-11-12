@@ -1,0 +1,37 @@
+acl stage3_f ipmode ipv4 src_ip 200.11.1.8/255.255.255.255 action forward outgroup_f 1 app_id 1 hit_statistics true
+acl stage3_f ipmode ipv4 src_ip 200.11.1.8/255.255.255.255 dst_ip 201.12.6.9/255.255.255.255 action forward outgroup_f 1 app_id 2 hit_statistics true priority 1
+acl stage3_f ipmode ipv4 src_ip 200.11.1.8/255.255.255.255 sport 25001 action block app_id 3 hit_statistics true priority 2
+acl stage3_f ipmode ipv4 src_ip 200.11.1.8/255.255.255.255 protocol tcp action forward outgroup_f 1 app_id 4 hit_statistics true priority 3
+acl stage3_f ipmode ipv4 dst_ip 201.12.6.9/255.255.255.255 action forward outgroup_f 1 app_id 5 hit_statistics true priority 4
+acl stage3_f ipmode ipv4 dst_ip 201.12.6.9/255.255.255.255 dport 5001 action block app_id 6 hit_statistics true priority 5
+acl stage3_f ipmode ipv4 dst_ip 201.12.6.9/255.255.255.255 protocol tcp action forward outgroup_f 1 app_id 7 hit_statistics true priority 6
+acl stage3_f ipmode ipv4 src_ip 200.11.1.1/255.255.255.0 action forward outgroup_f 1 app_id 8 hit_statistics true priority 7
+acl stage3_f ipmode ipv4 src_ip 200.11.0.1/255.255.0.0 dst_ip 201.12.0.1/255.255.0.0 action block app_id 9 hit_statistics true priority 8
+acl stage3_f ipmode ipv4 dst_ip 201.12.6.1/255.255.255.0 action forward outgroup_f 1 app_id 10 hit_statistics true priority 9
+acl stage3_f ipmode ipv4 src_ip 200.10.0.1/255.0.0.0 dst_ip 201.11.0.1/255.0.0.0 action forward outgroup_f 1 app_id 11 hit_statistics true priority 10
+acl stage3_f ipmode ipv4 src_ip 200.11.1.1/255.255.255.0 dst_ip 201.12.6.1/255.255.255.0 action block app_id 12 hit_statistics true priority 11
+acl stage3_f ipmode ipv4 dst_ip 201.12.0.1/255.255.0.0 protocol tcp action block app_id 13 hit_statistics true priority 12
+acl stage3_f ipmode ipv4 src_ip 200.11.1.1/255.255.255.0 dst_ip 201.12.6.1/255.255.255.0 sport 25001 action forward outgroup_f 1 app_id 14 hit_statistics true priority 13
+acl stage3_f ipmode ipv4 src_ip 200.11.1.8/255.255.255.255 dst_ip 201.12.6.9/255.255.255.255 dport 5001 action forward outgroup_f 1 app_id 15 hit_statistics true priority 14
+acl stage3_f ipmode ipv4 src_ip 200.11.1.8/255.255.255.255 dst_ip 201.12.6.9/255.255.255.255 sport 25001 dport 5001 protocol tcp action forward outgroup_f 1 app_id 16 hit_statistics true priority 15
+
+
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::1 action forward outgroup_f 1 app_id 21 hit_statistics true priority 0
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::1 dst_ip 2001:eeff:1234::1 action forward outgroup_f 1 app_id 22 hit_statistics true priority 1
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::1 sport 25001 action block app_id 23 hit_statistics true priority 2
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::1 protocol udp action forward outgroup_f 1 app_id 24 hit_statistics true priority 3
+acl stage3_f ipmode ipv6 dst_ip 2001:eeff:1234::1 action forward outgroup_f 1 app_id 25 hit_statistics true priority 4
+acl stage3_f ipmode ipv6 dst_ip 2001:eeff:1234::1 dport 5001 action block app_id 26 hit_statistics true priority 5
+acl stage3_f ipmode ipv6 dst_ip 2001:eeff:1234::1 protocol udp action forward outgroup_f 1 app_id 27 hit_statistics true priority 6
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::2/ffff:ffff:ffff:ffff:: action forward outgroup_f 1 app_id 28 hit_statistics true priority 7
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1000::2/ffff:ffff:: dst_ip 2001:eeff:2000::2/ffff:ffff:: action block app_id 29 hit_statistics true priority 8
+acl stage3_f ipmode ipv6 dst_ip 2001:eeff:1234::2/ffff:ffff:ffff:ffff:: action forward outgroup_f 1 app_id 30 hit_statistics true priority 9
+acl stage3_f ipmode ipv6 src_ip 2000:456:1000::2/ffff:: dst_ip 2001:789:2000::2/ffff:: action forward outgroup_f 1 app_id 31 hit_statistics true priority 10
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::2/ffff:ffff:ffff:ffff:: dst_ip 2001:eeff:1234::2/ffff:ffff:ffff:ffff:: action block app_id 32 hit_statistics true priority 11
+acl stage3_f ipmode ipv6 dst_ip 2001:789:2000::2/ffff:: protocol udp action block app_id 33 hit_statistics true priority 12
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::2/ffff:ffff:ffff:ffff:: dst_ip 2001:eeff:1234::2/ffff:ffff:ffff:ffff:: sport 25001 action forward outgroup_f 1 app_id 34 hit_statistics true priority 13
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::1 dst_ip 2001:eeff:1234::1 dport 5001 action forward outgroup_f 1 app_id 35 hit_statistics true priority 14
+acl stage3_f ipmode ipv6 src_ip 2000:abcd:1234::1 dst_ip 2001:eeff:1234::1 sport 25001 dport 5001 protocol udp action forward outgroup_f 1 app_id 36 hit_statistics true priority 15
+
+
+
