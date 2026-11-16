@@ -31,3 +31,4 @@ ${reboot_wait_time}    240    # 单位s
 ${excelName}      rule_bj.xls    # 所用配置文件的excel名字
 ${trex_ip}        192.168.11.128
 ${rcp_client}     192.168.4.147
+${ssl_switch}     0    # RCP 通信 SSL 加密开关：0 关闭，1 开启（改这里当次运行即生效）

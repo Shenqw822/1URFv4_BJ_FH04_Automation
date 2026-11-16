@@ -13,7 +13,29 @@ import ipaddress
 class RcpApiForRf:
 
     def __init__(self):
-        self.R3=RcpApiNew.RcpApi(configini.CLIENT['host_ip'], deviceId=configini.CLIENT['dev_id'], sslSwitch=configini.CLIENT['ssl_switch'])
+        self.R3 = self._newRcpConnection()
+
+    def _newRcpConnection(self):
+        return RcpApiNew.RcpApi(configini.CLIENT['host_ip'],
+                                deviceId=configini.CLIENT['dev_id'],
+                                sslSwitch=configini.CLIENT['ssl_switch'])
+
+    def _refreshRcpConnection(self):
+        """重新读取 config.ini 的 [client] 段并重建 RCP 连接。
+
+        RF 在套件启动时就实例化本库并建连，仅改 config.ini 不会影响已建立的连接。
+        写入 [client] 配置后调用本方法，改动即可在本次运行生效。
+        """
+        configini.reloadClientConfig()
+        old = getattr(self, 'R3', None)
+        if old is not None:
+            try:
+                old.close()
+            except Exception:
+                pass
+        self.R3 = self._newRcpConnection()
+        return self.R3
+
     def _nullTozero(self,value):
         if value:
             value_new=[]
@@ -189,10 +211,11 @@ class RcpApiForRf:
         return  self.R3.cli_time_epoc_switchRcp(time1,int(format),int(interval_time))
 
     def changeConfigOptionValue(self,configFileName,title,option,value=None):
-        if value:
-            configini.R3(configFileName).setR3(title, option, value)
-        else:
-            configini.R3(configFileName).setR3(title, option, value)
+        configini.R3(configFileName).setR3(title, option, value)
+        # 只有 [client] 段会影响 RCP 连接本身，改完必须重建连接，
+        # 否则 dst_ip / dev_id / ssl_switch 要等下次运行才生效。
+        if str(configFileName) == 'config' and str(title) == 'client':
+            self._refreshRcpConnection()
 
     def getConfigOptionValue(self, configFileName, title, option):
         "为了应对自动化一次性打流多个pcap文件，故而对title为多个进行处理，返回[value1,value2]"

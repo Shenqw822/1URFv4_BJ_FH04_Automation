@@ -88,6 +88,8 @@ Resource/
 
 RCP 是用于规则管理的私有 TCP 协议。`RcpApi` 类处理 socket 通信、用户认证以及使用二进制协议进行规则的增删改查。`RcpApiForRf` 将其封装为 Robot Framework 库。配置从动态生成的 `configini.py` 中读取。
 
+**SSL 加密开关**：`Resource/Business/variable.txt` 的 `${ssl_switch}`（`0` 关闭、`1` 开启，默认 `0`），由 `04 Rcp.robot:rcp_init` 写入 `config/config.ini` 的 `[client] ssl_switch`。写入 `[client]` 段后 `changeConfigOptionValue` 会调用 `configini.reloadClientConfig()` 并重建 RCP 连接，因此改动在**本次运行**即生效，不再要等下次。`RcpApiNew` / `RcpApiNew_2` / `RcpApi` 三份实现均使用基于 `__file__` 的 `CERT_DIR` 定位 `cerent/` 证书，与运行目录无关。
+
 ### 设备通信
 
 与被测设备的两条通路：

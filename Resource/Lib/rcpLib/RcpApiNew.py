@@ -14,6 +14,7 @@ function:提供rcp客户端所需要的接口分为如下：
 import socket
 import binascii
 import re
+import os
 import time
 
 import rcp_packet_data
@@ -22,6 +23,9 @@ import ssl
 import time
 import datetime
 # from config import CLIENT
+
+# 证书跟随代码目录，避免从仓库根目录运行 RF 时找不到 cerent/
+CERT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'cerent')
 
 
 
@@ -58,7 +62,11 @@ class RcpApi:
         """
         conn = socket.socket(type=socket.SOCK_STREAM)
         if sslSwitch:
-            sk = ssl.wrap_socket(conn, keyfile='cerent/client.key', certfile='cerent/client.crt', cert_reqs=ssl.CERT_REQUIRED, ca_certs='cerent/ca.crt')
+            sk = ssl.wrap_socket(conn,
+                                 keyfile=os.path.join(CERT_DIR, 'client.key'),
+                                 certfile=os.path.join(CERT_DIR, 'client.crt'),
+                                 cert_reqs=ssl.CERT_REQUIRED,
+                                 ca_certs=os.path.join(CERT_DIR, 'ca.crt'))
             sk.connect((self.hostip, self.port))
             # print(sk.getpeercert())
             return sk

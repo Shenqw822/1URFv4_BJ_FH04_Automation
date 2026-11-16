@@ -26,6 +26,23 @@ CLIENT = {
     'dev_id': config.get('client', 'dev_id'),
     'ssl_switch': int(config.get('client', 'ssl_switch'))}
 
+
+def reloadClientConfig():
+    """重新读取 config.ini 的 [client] 段并原地更新 CLIENT。
+
+    RF 在导入库时就创建了 RCP 连接，而用例里的 changeConfigOptionValue
+    只改了 config.ini 文件，CLIENT 仍是导入时的旧值。改完配置后调用本函数，
+    可让本次运行立即使用新的 host_ip / dev_id / ssl_switch。
+    """
+    cfg = configparser.ConfigParser()
+    with open(os.path.join(BASE_DIR, 'config.ini'), 'r', encoding='utf-8') as f:
+        cfg.read_file(f)
+    CLIENT['host_ip'] = cfg.get('client', 'dst_ip')
+    CLIENT['dev_id'] = cfg.get('client', 'dev_id')
+    CLIENT['ssl_switch'] = int(cfg.get('client', 'ssl_switch'))
+    return CLIENT
+
+
 SERVER = {
     'server_ip': config.get('netcard', 'server_ip'),
     'username': config.get('netcard', 'username'),
@@ -87,11 +104,13 @@ class R3:
 
 
     def setR3(self,title,option,value=None):
-        if value:
-            self.config.set(title,option,str(value))
+        # 用 value is not None 判断而不是 if value：数值 0 是合法配置值，
+        # 旧写法会把 0 当成“未设置”而写入空字符串，导致 int('') 报错。
+        if value is not None:
+            self.config.set(title, option, str(value))
         else:
-            self.config.set(title, option,str())
-        with open(os.path.join(BASE_DIR, "%s.ini"%self.configName),'w') as f:
+            self.config.set(title, option, str())
+        with open(os.path.join(BASE_DIR, "%s.ini"%self.configName), 'w', encoding='utf-8') as f:
             self.config.write(f)
 
 
