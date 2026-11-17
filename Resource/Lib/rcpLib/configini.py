@@ -52,7 +52,7 @@ SERVER = {
 class R3:
     def __init__(self,configName):
         self.configName = configName
-        self.config = configparser.ConfigParser()
+        self.config = configparser.ConfigParser(strict=False)
         with open(os.path.join(BASE_DIR, "%s.ini"%configName), 'r', encoding='utf-8') as f:
             self.config.read_file(f)
 

@@ -2,16 +2,16 @@
 ${host_ip}        192.168.128.235    # 被测设备ip
 ${cli_login_port}    9999    # 被测设备登录端口
 ${cli_login_port_oppositedevice}    9999    # 被测设备登录端口
-${device_id}      127
+${device_id}      4294967295
 ${username}       sysadmin
-${ingroupId}      127    # 入口组id，取值范围0-127
-@{inportId}       2/5    # 设备输入端口，串接测试时输入多个
+${ingroupId}      127    # 入口组id，取值范围0-127，和ingroup用例有关，若改动同步修改该用例
+@{inportId}       3/7    # 设备输入端口，串接测试时输入多个
 ${outgroup_fId_1}    1
-@{outgroup_f_portId_1}    2/5    # 设备输出端口，可配置多个，数量要与inportid个数一致，配置linkmap时一一对应
+@{outgroup_f_portId_1}    3/7    # 设备输出端口，可配置多个，数量要与inportid个数一致，配置linkmap时一一对应
 ${outgroup_fId_2}    60
-@{outgroup_f_portId_2}    2/6    # 在clientmirror镜像报文中使用，不能和业务输出端口同一个
+@{outgroup_f_portId_2}    3/8    # 在clientmirror镜像报文中使用，不能和业务输出端口同一个
 ${ingroup_back_id}    0    # 在vlan、mpls中使用，测试规则是否基于入口组
-@{ingroup_back_port}    2/4    # 背景入口组成员，需要该成员存在
+@{ingroup_back_port}    3/6    # 背景入口组成员，需要该成员存在
 ${userName1}      sysadmin    #登录用户名user1
 ${userPw1}        sysadmin    #登录用户密码user1
 ${ImportFilepath}    ${CURDIR}/rule_pcap/    # 规则、pcap文件名存放路径，内含下发规则和对应pcap包的关系

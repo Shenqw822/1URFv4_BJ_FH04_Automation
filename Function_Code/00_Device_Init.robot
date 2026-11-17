@@ -46,6 +46,9 @@ deviceInit
         telnet.write    interface eth ${outgroup_f_portId_1}[${i}] single_fiber true
         telnet.read until    ${userName1}(config)#
     END
+    comment    配置设备ID（与RCP报文头deviceId保持一致）
+    telnet.write    global device_id ${device_id}
+    telnet.read until    ${userName1}(config)#
     comment    开启特征码规则开关
     telnet.write    global stage4_fixed_f enable
     telnet.read until    ${userName1}(config)#

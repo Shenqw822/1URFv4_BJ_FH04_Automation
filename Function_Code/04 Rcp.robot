@@ -20,7 +20,7 @@ rcp_init
     comment    设置rcp的config配置
     log    设备相关配置
     changeConfigOptionValue    config    client    dst_ip    ${host_ip}
-    changeConfigOptionValue    config    client    dev_id    0
+    changeConfigOptionValue    config    client    dev_id    ${device_id}
     changeConfigOptionValue    config    client    ssl_switch    ${ssl_switch}
     log    仪表服务器相关配置
     changeConfigOptionValue    config    netcard    server_ip    ${trex_ip}
